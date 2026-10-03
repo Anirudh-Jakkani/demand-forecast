@@ -84,6 +84,11 @@ uv run forecast simulate --days 120 --shock-factor 1.6   # demand x1.6 from half
 uv run forecast dashboard                                 # http://localhost:8501
 ```
 
+Example run on the synthetic sample (start 2016-01-15, demand x1.6 from 2016-03-15): live WAPE
+climbs from 1.03x to 1.20x the backtest score over five days, Evidently flags `sales` drift on
+day 4, the cooldown holds it for one more day, and on 2016-03-20 the monitoring flow retrains
+on its own (`target 'sales' drifted`). The new champion brings WAPE back to ~1.0x within a week.
+
 `simulate` stands on day 0, trains, then walks forward one day at a time running the real
 monitoring flow each day (which retrains whenever a trigger fires). A shock can be injected
 from any date: `--shock-factor` scales demand, `--price-factor` scales prices, `--dept` limits
@@ -100,9 +105,15 @@ The dashboard shows, for either workspace:
 - **Tables:** monitoring log with every decision and reason, registry versions, and the
   embedded Evidently HTML report for any day
 
-Retrain triggers (in `configs/config.yaml`): live WAPE > 1.25x the champion's backtest WAPE
-(given >= 100 scored points), >= 50% of monitored columns drifted, or the champion's data is
-more than 35 days old. Every monitoring run is stored in `data/monitoring.sqlite` and each drift
+Retrain triggers (in `configs/config.yaml`), any one is enough:
+
+- live WAPE > 1.25x the champion's backtest WAPE (given >= 100 scored points)
+- the target (`sales`) drifts, or >= 50% of monitored columns drift; drift is ignored for
+  7 days after a retrain so a fresh model isn't retrained again on the same change
+- the champion's data is more than 35 days old (capped at the 28-day horizon in replays,
+  so there are never days without forecasts to score)
+
+Every monitoring run is stored in `data/monitoring.sqlite` and each drift
 check writes an Evidently HTML report to `reports/`.
 
 ### Run on real M5 data

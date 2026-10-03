@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pandas as pd
@@ -37,18 +38,18 @@ class MonitoringStore:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path) as conn:
+        with closing(sqlite3.connect(self.path)) as conn, conn:
             conn.executescript(SCHEMA)
 
     def write(self, row: dict) -> None:
         row = {k: (json.dumps(v) if isinstance(v, (list, dict)) else v) for k, v in row.items()}
         cols = ", ".join(row)
         marks = ", ".join("?" for _ in row)
-        with sqlite3.connect(self.path) as conn:
+        with closing(sqlite3.connect(self.path)) as conn, conn:
             conn.execute(f"INSERT INTO monitoring_runs ({cols}) VALUES ({marks})",
                          list(row.values()))
 
     def read(self) -> pd.DataFrame:
-        with sqlite3.connect(self.path) as conn:
+        with closing(sqlite3.connect(self.path)) as conn, conn:
             return pd.read_sql("SELECT * FROM monitoring_runs ORDER BY as_of, run_at", conn,
                                parse_dates=["as_of", "model_data_end"])

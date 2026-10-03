@@ -44,6 +44,9 @@ class MonitoringConfig(BaseModel):
     max_wape_ratio: float = 1.25       # retrain if live WAPE > ratio x backtest WAPE
     drift_window_days: int = 28        # size of reference and current windows for drift
     drift_share_threshold: float = 0.5 # retrain if this share of columns drifted
+    target_drift_trigger: bool = True  # also retrain if the target column alone drifts
+    target_column: str = "sales"
+    drift_cooldown_days: int = 7       # ignore drift for N days after a retrain (no flapping)
     max_model_age_days: int = 35       # retrain if the champion's data is older than this
     db_path: Path = Path("data/monitoring.sqlite")
     reports_dir: Path = Path("reports")

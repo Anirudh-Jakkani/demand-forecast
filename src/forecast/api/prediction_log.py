@@ -7,6 +7,7 @@ data the model had seen, so `date - cutoff` is the forecast horizon in days.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pandas as pd
@@ -31,7 +32,7 @@ class PredictionLog:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.executescript(SCHEMA)
             cols = {row[1] for row in conn.execute("PRAGMA table_info(predictions)")}
             if "cutoff" not in cols:  # logs created before the column existed
@@ -48,17 +49,17 @@ class PredictionLog:
              r.date.date().isoformat(), float(r.yhat), cutoff_s)
             for r in forecasts.itertuples(index=False)
         ]
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.executemany(
                 "INSERT INTO predictions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
             )
 
     def has_request(self, request_id: str) -> bool:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute("SELECT 1 FROM predictions WHERE request_id = ? LIMIT 1",
                                (request_id,)).fetchone()
         return row is not None
 
     def read(self) -> pd.DataFrame:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             return pd.read_sql("SELECT * FROM predictions", conn, parse_dates=["date", "cutoff"])

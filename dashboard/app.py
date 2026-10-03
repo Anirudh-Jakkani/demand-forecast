@@ -84,9 +84,11 @@ def event_layers(changes: pd.DataFrame, shock: dict | None, end: pd.Timestamp) -
                              "label": [shock_label(shock)]})
         layers.append(alt.Chart(band).mark_rect(color=MUTED, opacity=0.10)
                       .encode(x="start:T", x2="end:T"))
-        layers.append(alt.Chart(band).mark_text(align="left", baseline="top", dx=4, dy=4,
+        # Label sits on the zero line inside the band, clear of the threshold lines up top.
+        # (Anchored in data space: a pixel position at the bottom edge shrinks the plot.)
+        layers.append(alt.Chart(band).mark_text(align="left", baseline="bottom", dx=4, dy=-4,
                                                 color=INK_2, fontSize=11)
-                      .encode(x="start:T", y=alt.value(0), text="label:N"))
+                      .encode(x="start:T", y=alt.datum(0), text="label:N"))
     if not changes.empty:
         ev = changes.assign(label="▲ v" + changes["model_version"].astype(str))
         layers.append(alt.Chart(ev).mark_rule(color=INK_2, strokeDash=[2, 3], strokeWidth=1)
@@ -142,6 +144,7 @@ shock = meta.get("shock") if meta else None
 st.title("Forecast model health")
 st.caption(f"Registry model `{cfg.registry.model_name}` · daily store × item unit sales · "
            f"retrain if live WAPE > {cfg.monitoring.max_wape_ratio:g}× backtest, "
+           f"`{cfg.monitoring.target_column}` drifts, "
            f"≥ {cfg.monitoring.drift_share_threshold:.0%} of columns drift, or the model is "
            f"> {cfg.monitoring.max_model_age_days} days old")
 
@@ -156,18 +159,18 @@ end = runs["as_of"].max()
 
 # KPI row
 k = st.columns(5)
-k[0].metric("Serving", f"v{latest['model_version']}", latest["model_type"], delta_color="off")
+k[0].metric("Serving", f"v{latest['model_version']}", help=f"model type: {latest['model_type']}")
 if pd.notna(latest["live_wape"]):
-    k[1].metric("Live WAPE (7d)", f"{latest['live_wape']:.3f}",
+    k[1].metric("Live WAPE", f"{latest['live_wape']:.3f}",
                 f"{latest['live_wape'] - latest['cv_wape']:+.3f} vs backtest",
                 delta_color="inverse")
 else:
-    k[1].metric("Live WAPE (7d)", "n/a", "no forecasts cover these days", delta_color="off")
-k[2].metric("Columns drifting", "n/a" if pd.isna(latest["drift_share"])
+    k[1].metric("Live WAPE", "n/a", help="no forecasts cover the last 7 days")
+k[2].metric("Drifting", "n/a" if pd.isna(latest["drift_share"])
             else f"{latest['drift_share']:.0%}")
-k[3].metric("Model age", f"{int(latest['model_age_days'])} days")
-k[4].metric("Last decision", decision_badge(latest["decision"]),
-            f"{len(changes)} model changes", delta_color="off")
+k[3].metric("Age", f"{int(latest['model_age_days'])}d")
+k[4].metric("Decision", decision_badge(latest["decision"]),
+            help=f"{len(changes)} model changes during this period")
 if latest["reasons"]:
     st.warning("**Retrain triggered on " + str(latest["as_of"].date()) + ":** "
                + "; ".join(latest["reasons"]))
@@ -182,7 +185,8 @@ chart = hover_time_chart(
     {"live WAPE": BLUE, "backtest WAPE": INK_2, "retrain limit": MUTED},
     "WAPE (lower is better)", dashes={"retrain limit": [5, 4]},
 )
-st.altair_chart(alt.layer(*event_layers(changes, shock, end), chart).properties(height=300),
+st.altair_chart(alt.layer(*event_layers(changes, shock, end), chart)
+                .properties(height=300),
                 use_container_width=True)
 st.caption("Live WAPE scores the forecasts that were actually served over the trailing 7 days. "
            "▲ marks the day a new champion started serving; the shaded band is the injected shock.")

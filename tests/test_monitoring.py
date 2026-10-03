@@ -46,6 +46,15 @@ def test_retrain_policy_triggers():
     assert retrain_reasons(cfg, 0.60, 0.40, 0.0, 7, 10) == []          # too few points
     assert "drifted" in retrain_reasons(cfg, 0.40, 0.40, 0.67, 7, 500)[0]
     assert "days old" in retrain_reasons(cfg, 0.40, 0.40, 0.0, 40, 500)[0]
+    # Target drift alone is enough, even below the column-share threshold...
+    reasons = retrain_reasons(cfg, 0.40, 0.40, 0.33, 7, 500, ["sales"], {"sales": 0.36})
+    assert reasons == ["target 'sales' drifted (drift score 0.360)"]
+    # ...but not a non-target column, and not when the trigger is switched off.
+    assert retrain_reasons(cfg, 0.40, 0.40, 0.33, 7, 500, ["sell_price"]) == []
+    off = cfg.model_copy(update={"target_drift_trigger": False})
+    assert retrain_reasons(off, 0.40, 0.40, 0.33, 7, 500, ["sales"]) == []
+    # A freshly retrained model gets a cooldown before drift can retrain it again.
+    assert retrain_reasons(cfg, 0.40, 0.40, 1.0, 3, 500, ["sales"]) == []
 
 
 def test_drift_detects_demand_shift(long_df, tmp_path):
@@ -126,6 +135,7 @@ def test_demand_shock_triggers_retrain(prefect_env, tmp_path, raw_dir, long_df):
 
     assert result["decision"] == "retrain"
     assert any("backtest WAPE" in r for r in result["reasons"])
+    assert any("drifted" in r for r in result["reasons"])
     assert "sales" in result["drifted_columns"]
     # The triggered retrain ran and refreshed the champion on post-shock data.
     assert result["training"]["promoted"] and result["training"]["as_of"] == two_weeks

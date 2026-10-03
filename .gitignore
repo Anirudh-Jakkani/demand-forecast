@@ -11,3 +11,4 @@ mlflow.db
 .env
 reports/
 sim/
+sim_run.log
