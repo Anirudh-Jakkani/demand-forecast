@@ -12,11 +12,12 @@ dependencies = [
     "pydantic>=2.6",
     "mlflow>=2.14",
     "matplotlib>=3.8",
+    "lightgbm>=4.3",
 ]
 
 [project.optional-dependencies]
 # Added in later phases; kept here so the full stack is visible up front.
-models = ["lightgbm>=4.3", "prophet>=1.1.5", "optuna>=3.6"]
+models = ["prophet>=1.1.5", "optuna>=3.6"]
 serve = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 pipeline = ["prefect>=3.0"]
 monitor = ["evidently>=0.4", "streamlit>=1.33"]

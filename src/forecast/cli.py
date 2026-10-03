@@ -2,13 +2,14 @@
 
     forecast make-sample          # synthetic M5-shaped data -> data/raw
     forecast ingest               # raw CSVs -> processed parquet
-    forecast backtest -m seasonal_naive
+    forecast backtest -m seasonal_naive -m lightgbm
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import time
 
 import pandas as pd
 
@@ -40,27 +41,43 @@ def cmd_ingest(cfg, args) -> None:
 
 
 def cmd_backtest(cfg, args) -> None:
-    from forecast.tracking import log_backtest, setup_mlflow  # mlflow import is slow
-
     df = pd.read_parquet(cfg.resolve(cfg.data.processed_path))
     validate_long(df)
     bt = cfg.backtest
-    result = run_backtest(MODELS[args.model], df, bt.horizon, bt.n_folds, bt.step)
-
-    print(result.fold_metrics.to_string(index=False))
-    print("\nmean over folds:", {k: round(v, 4) for k, v in result.summary.items()})
-
+    data_info = {
+        "n_series": int(df["id"].nunique()),
+        "data_start": str(df["date"].min().date()),
+        "data_end": str(df["date"].max().date()),
+        "state": cfg.data.state,
+        "category": cfg.data.category,
+    }
     if not args.no_mlflow:
+        from forecast.tracking import setup_mlflow  # mlflow import is slow
+
         setup_mlflow(cfg)
-        data_info = {
-            "n_series": int(df["id"].nunique()),
-            "data_start": str(df["date"].min().date()),
-            "data_end": str(df["date"].max().date()),
-            "state": cfg.data.state,
-            "category": cfg.data.category,
-        }
-        run_id = log_backtest(args.model, MODELS[args.model]().get_params(), result, cfg, data_info)
-        log.info("Logged MLflow run %s", run_id)
+
+    summaries = {}
+    for name in args.model or ["seasonal_naive"]:
+        params = cfg.model_params(name)
+        log.info("Backtesting %s %s", name, params)
+        start = time.perf_counter()
+        result = run_backtest(lambda n=name, p=params: MODELS[n](**p), df,
+                              bt.horizon, bt.n_folds, bt.step)
+        elapsed = time.perf_counter() - start
+
+        print(f"\n== {name} ({elapsed:.0f}s) ==")
+        print(result.fold_metrics.to_string(index=False))
+        summaries[name] = {**result.summary, "seconds": elapsed}
+
+        if not args.no_mlflow:
+            from forecast.tracking import log_backtest
+
+            run_id = log_backtest(name, result.last_model.get_params(), result, cfg, data_info)
+            log.info("Logged MLflow run %s", run_id)
+
+    table = pd.DataFrame(summaries).T.sort_values("wape")
+    print("\n== mean over folds (sorted by WAPE) ==")
+    print(table.round(4).to_string())
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -76,8 +93,9 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("ingest", help="raw M5 CSVs -> processed parquet")
     p.set_defaults(func=cmd_ingest)
 
-    p = sub.add_parser("backtest", help="rolling-origin backtest of one model")
-    p.add_argument("-m", "--model", choices=sorted(MODELS), default="seasonal_naive")
+    p = sub.add_parser("backtest", help="rolling-origin backtest of one or more models")
+    p.add_argument("-m", "--model", choices=sorted(MODELS), action="append",
+                   help="repeatable: -m seasonal_naive -m lightgbm (default: seasonal_naive)")
     p.add_argument("--no-mlflow", action="store_true", help="skip MLflow logging")
     p.set_defaults(func=cmd_backtest)
 

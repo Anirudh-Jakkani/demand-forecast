@@ -11,7 +11,8 @@ and a served API.
 |---|---|---|
 | 1 | Ingest + validation (M5 → long Parquet) | done |
 | 2 | Rolling-origin backtest harness, metrics, baselines, MLflow tracking | done |
-| 3 | LightGBM (lags / rolling / price / calendar), Prophet or N-BEATS | next |
+| 3a | Global LightGBM (lags / rolling / price / calendar), Tweedie loss | done |
+| 3b | Prophet or N-BEATS | next |
 | 4 | MLflow registry + champion promotion, FastAPI serving | |
 | 5 | Prefect training + monitoring flows | |
 | 6 | Evidently drift, replay simulation, Streamlit dashboard | |
@@ -31,8 +32,7 @@ uv run pytest                        # tests run on a synthetic M5-shaped sample
 ```bash
 uv run forecast make-sample
 uv run forecast ingest
-uv run forecast backtest -m seasonal_naive
-uv run forecast backtest -m moving_average
+uv run forecast backtest -m seasonal_naive -m moving_average -m lightgbm
 uv run mlflow ui --backend-store-uri sqlite:///mlflow.db   # http://127.0.0.1:5000
 ```
 
@@ -57,6 +57,11 @@ start date) and backtest settings live in [`configs/config.yaml`](configs/config
   day of data. Each fold gets a fresh model.
 - **Metrics.** WAPE (headline: "% of units wrong"), MAE, RMSE, bias (+ = over-forecast),
   and RMSSE (M5's metric, unweighted).
+- **LightGBM, one global model** over all series ([`models/lgbm.py`](src/forecast/models/lgbm.py)),
+  Tweedie loss for zero-heavy demand. Every sales feature is lagged >= 28 days
+  ([`features/build.py`](src/forecast/features/build.py)), so the full 28-day horizon is
+  predicted directly with no recursion and no leakage; a test scrambles post-cutoff sales and
+  asserts no in-horizon feature changes. Hyperparameters live in `configs/config.yaml`.
 - **Pre-launch rows dropped.** Days before an item has a price are not real zero demand.
 
 ## Layout
@@ -66,7 +71,8 @@ configs/config.yaml        scope, backtest and MLflow settings
 src/forecast/
   data/                    ingest, validation, synthetic sample generator
   evaluation/              metrics, backtest
-  models/                  ForecastModel interface + baselines
+  features/                leak-safe feature engineering
+  models/                  ForecastModel interface, baselines, LightGBM
   tracking.py              MLflow logging
   cli.py                   `forecast` command
 tests/

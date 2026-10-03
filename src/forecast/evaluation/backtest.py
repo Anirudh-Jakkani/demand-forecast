@@ -52,6 +52,7 @@ def iter_splits(df, horizon, n_folds, step) -> Iterator[tuple[Fold, pd.DataFrame
 class BacktestResult:
     fold_metrics: pd.DataFrame      # one row per fold
     predictions: pd.DataFrame       # id, date, fold, sales, yhat
+    last_model: ForecastModel       # model from the most recent fold, for inspection
 
     @property
     def summary(self) -> dict[str, float]:
@@ -75,4 +76,4 @@ def run_backtest(
         rows.append({"fold": fold.index, "cutoff": fold.cutoff, **score(train, scored)})
         preds.append(scored)
 
-    return BacktestResult(pd.DataFrame(rows), pd.concat(preds, ignore_index=True))
+    return BacktestResult(pd.DataFrame(rows), pd.concat(preds, ignore_index=True), model)

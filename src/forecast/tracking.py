@@ -42,6 +42,13 @@ def log_backtest(
             result.fold_metrics.to_csv(fold_csv, index=False)
             mlflow.log_artifact(str(fold_csv))
             mlflow.log_figure(plot_backtest(result), "backtest_total_sales.png")
+
+            if hasattr(result.last_model, "feature_importance"):
+                imp = result.last_model.feature_importance()
+                imp_csv = Path(tmp) / "feature_importance.csv"
+                imp.to_csv(imp_csv, index=False)
+                mlflow.log_artifact(str(imp_csv))
+                mlflow.log_figure(plot_importance(imp), "feature_importance.png")
         return run.info.run_id
 
 
@@ -56,6 +63,17 @@ def plot_backtest(result: BacktestResult):
     ax.set_ylabel("units / day (all series)")
     ax.set_title("Backtest: actual vs forecast per fold")
     ax.legend()
+    fig.tight_layout()
+    plt.close(fig)
+    return fig
+
+
+def plot_importance(imp, top: int = 20):
+    top_imp = imp.head(top).iloc[::-1]
+    fig, ax = plt.subplots(figsize=(7, 0.3 * len(top_imp) + 1))
+    ax.barh(top_imp["feature"], top_imp["gain"], color="C0")
+    ax.set_xlabel("total gain (last fold)")
+    ax.set_title(f"Top {len(top_imp)} features")
     fig.tight_layout()
     plt.close(fig)
     return fig

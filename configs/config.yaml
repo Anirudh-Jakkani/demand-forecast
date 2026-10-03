@@ -10,6 +10,18 @@ backtest:
   n_folds: 4                     # rolling-origin folds, stepping back `step` days each
   step: 28
 
+models:                          # constructor kwargs per model; omitted ones use defaults
+  seasonal_naive:
+    season: 7
+  moving_average:
+    window: 28
+  lightgbm:
+    num_boost_round: 600
+    train_days: 730              # fit on the last 2 years per fold (features use older history)
+    learning_rate: 0.05
+    num_leaves: 127
+    tweedie_variance_power: 1.1
+
 mlflow:
   tracking_uri: sqlite:///mlflow.db
   experiment: m5-demand-forecast

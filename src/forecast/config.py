@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel
@@ -33,11 +34,15 @@ class MlflowConfig(BaseModel):
 class Config(BaseModel):
     data: DataConfig
     backtest: BacktestConfig = BacktestConfig()
+    models: dict[str, dict[str, Any]] = {}
     mlflow: MlflowConfig = MlflowConfig()
 
     def resolve(self, path: Path) -> Path:
         """Relative paths in the config are relative to the project root."""
         return path if path.is_absolute() else PROJECT_ROOT / path
+
+    def model_params(self, name: str) -> dict[str, Any]:
+        return dict(self.models.get(name) or {})
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG) -> Config:
