@@ -25,14 +25,23 @@ def tracking_uri(cfg: Config) -> str:
     return uri
 
 
+def is_local_store(uri: str) -> bool:
+    return uri.startswith(("sqlite:", "file:")) or "://" not in uri
+
+
 def setup_mlflow(cfg: Config) -> None:
-    mlflow.set_tracking_uri(tracking_uri(cfg))
+    uri = tracking_uri(cfg)
+    mlflow.set_tracking_uri(uri)
     client = mlflow.MlflowClient()
     if client.get_experiment_by_name(cfg.mlflow.experiment) is None:
-        # Pin artifacts to a fixed folder instead of "wherever the process was started".
-        root = cfg.resolve(cfg.mlflow.artifact_root)
-        root.mkdir(parents=True, exist_ok=True)
-        client.create_experiment(cfg.mlflow.experiment, artifact_location=root.as_uri())
+        if is_local_store(uri):
+            # Pin artifacts to a fixed folder instead of "wherever the process was started".
+            root = cfg.resolve(cfg.mlflow.artifact_root)
+            root.mkdir(parents=True, exist_ok=True)
+            client.create_experiment(cfg.mlflow.experiment, artifact_location=root.as_uri())
+        else:
+            # A tracking server (e.g. in Docker) decides where artifacts live and proxies them.
+            client.create_experiment(cfg.mlflow.experiment)
     mlflow.set_experiment(cfg.mlflow.experiment)
 
 

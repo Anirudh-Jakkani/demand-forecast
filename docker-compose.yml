@@ -1,0 +1,107 @@
+# Full stack:  docker compose up -d --build
+#   API        http://localhost:8000/docs
+#   Dashboard  http://localhost:8501
+#   MLflow     http://localhost:5000
+#   Prefect    http://localhost:4200
+#
+# To use real M5 data, put the three CSVs in ./data/raw and uncomment the bind mount below.
+
+x-env: &env
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  PREFECT_API_URL: http://prefect-server:4200/api
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+
+x-app: &app
+  build: .
+  image: demand-forecast-mlops:local
+  environment: *env
+  volumes:
+    - data:/app/data
+    # - ./data/raw:/app/data/raw:ro
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-forecast}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forecast}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forecast}"]
+      interval: 5s
+      retries: 20
+
+  mlflow:
+    <<: *app
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER:-forecast}:${POSTGRES_PASSWORD:-forecast}@postgres:5432/mlflow
+      --artifacts-destination /app/mlartifacts --serve-artifacts
+      --host 0.0.0.0 --port 5000 --allowed-hosts "*"
+    volumes:
+      - mlartifacts:/app/mlartifacts
+    ports: ["5000:5000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      retries: 30
+
+  prefect-server:
+    <<: *app
+    command: prefect server start --host 0.0.0.0 --port 4200
+    environment:
+      <<: *env
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-forecast}:${POSTGRES_PASSWORD:-forecast}@postgres:5432/prefect
+    ports: ["4200:4200"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health')"]
+      interval: 10s
+      retries: 30
+
+  bootstrap:
+    <<: *app
+    command: ["bash", "docker/bootstrap.sh"]
+    restart: "no"
+    depends_on:
+      mlflow: {condition: service_healthy}
+      prefect-server: {condition: service_healthy}
+
+  api:
+    <<: *app
+    command: forecast serve --host 0.0.0.0 --port 8000
+    ports: ["8000:8000"]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      retries: 30
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: forecast pipeline serve   # weekly training + daily monitoring schedules
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+  dashboard:
+    <<: *app
+    command: >
+      streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port 8501
+      --server.headless true --browser.gatherUsageStats false
+    ports: ["8501:8501"]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  data:
+  mlartifacts:

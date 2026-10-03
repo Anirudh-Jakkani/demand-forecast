@@ -1,0 +1,4 @@
+# Normalize line endings in the repo; shell scripts must stay LF to run in Linux containers.
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf

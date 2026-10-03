@@ -1,5 +1,7 @@
 # Demand Forecasting with MLOps (M5)
 
+[![CI](https://github.com/Anirudh-Jakkani/demand-forecast/actions/workflows/ci.yml/badge.svg)](https://github.com/Anirudh-Jakkani/demand-forecast/actions/workflows/ci.yml)
+
 Daily unit-sales forecasts per **store × item** for Walmart's M5 dataset (California, FOODS:
 ~5.8k series), built as a production system rather than a notebook: time-respecting
 backtests, experiment tracking, a model registry, scheduled retraining, drift monitoring,
@@ -16,7 +18,7 @@ and a served API.
 | 4 | MLflow registry + champion promotion, FastAPI serving | done |
 | 5 | Prefect training + monitoring flows, Evidently drift, retrain triggers | done |
 | 6 | Replay simulation with injected drift, Streamlit dashboard | done |
-| 7 | Docker Compose, GitHub Actions CI | next |
+| 7 | Docker Compose, GitHub Actions CI | done |
 
 ## Quickstart
 
@@ -127,6 +129,38 @@ competition and put these three files in `data/raw/` (overwriting any synthetic 
 
 Then run `forecast ingest` and `forecast backtest` as above. Scope (state, category,
 start date) and backtest settings live in [`configs/config.yaml`](configs/config.yaml).
+
+## Docker
+
+```bash
+docker compose up -d --build
+```
+
+| Service | What | URL |
+|---|---|---|
+| `postgres` | metadata store for MLflow and Prefect | |
+| `mlflow` | tracking server + model registry, serves artifacts from a volume | http://localhost:5000 |
+| `prefect-server` | orchestration API + UI | http://localhost:4200 |
+| `bootstrap` | one-shot: sample data if none, ingest, train the first champion | |
+| `api` | FastAPI forecasts, hot-swaps the champion | http://localhost:8000/docs |
+| `worker` | runs the weekly training and daily monitoring schedules | |
+| `dashboard` | Streamlit model health | http://localhost:8501 |
+
+All app services share one image and the same `configs/config.yaml`; the standard
+`MLFLOW_TRACKING_URI` env var points them at the MLflow server. To use real M5 data, put the
+CSVs in `./data/raw` and uncomment the bind mount in `docker-compose.yml`. Credentials default
+to `forecast/forecast`; override with `POSTGRES_USER` / `POSTGRES_PASSWORD` in a `.env` file.
+
+## CI (GitHub Actions)
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request:
+
+1. **Lint + fast tests + CLI smoke**: ruff, `pytest -m "not slow"`, then synthetic data ->
+   ingest -> backtest of seasonal naive and LightGBM.
+2. **Slow tests**: registry promotion rules, API, Prefect flows, demand-shock retrain, replay.
+3. **Docker**: build the image, `docker compose up`, wait for bootstrap to train a champion,
+   then hit `/predict`, MLflow, Prefect and the dashboard; on `v*` tags the image is pushed to
+   GHCR.
 
 ## Design notes
 

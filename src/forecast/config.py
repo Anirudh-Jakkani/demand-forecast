@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -83,4 +84,9 @@ class Config(BaseModel):
 
 def load_config(path: Path | str = DEFAULT_CONFIG) -> Config:
     with open(path, encoding="utf-8") as f:
-        return Config.model_validate(yaml.safe_load(f))
+        cfg = Config.model_validate(yaml.safe_load(f))
+    # Standard MLflow variable wins, so containers can point at a tracking server
+    # (e.g. http://mlflow:5000) while sharing the same YAML as local runs.
+    if os.environ.get("MLFLOW_TRACKING_URI"):
+        cfg.mlflow.tracking_uri = os.environ["MLFLOW_TRACKING_URI"]
+    return cfg

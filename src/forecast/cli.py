@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 import time
 
 import pandas as pd
@@ -164,7 +165,6 @@ def cmd_simulate(cfg, args) -> None:
 
 def cmd_dashboard(cfg, args) -> None:
     import subprocess
-    import sys
 
     from forecast.config import PROJECT_ROOT
 
@@ -175,6 +175,11 @@ def cmd_dashboard(cfg, args) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # Windows consoles default to a legacy codepage; MLflow prints emoji when talking to a
+    # tracking server, which would crash the command mid-run.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     for noisy in ("httpx", "httpcore", "alembic", "mlflow.utils", "mlflow.store"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

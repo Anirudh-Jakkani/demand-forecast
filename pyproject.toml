@@ -23,6 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 # Added in later phases; kept here so the full stack is visible up front.
 models = ["prophet>=1.1.5", "optuna>=3.6"]
+postgres = ["psycopg2-binary>=2.9"]   # MLflow server backend in Docker
 
 [project.scripts]
 forecast = "forecast.cli:main"
