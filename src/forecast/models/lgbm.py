@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 import lightgbm as lgb
+import numpy as np
 import pandas as pd
 
 from forecast.features.build import CATEGORICAL, FEATURES, LOOKBACK_DAYS, MIN_LAG, add_features
@@ -31,11 +32,14 @@ DEFAULT_PARAMS: dict[str, Any] = {
 class LGBMForecaster(ForecastModel):
     name = "lightgbm"
 
-    def __init__(self, num_boost_round: int = 600, train_days: int | None = 730, **params):
+    def __init__(self, num_boost_round: int = 600, train_days: int | None = 730,
+                 chunk_series: int = 1000, **params):
         """`train_days` limits fitting to the most recent N days (features still use
-        older history), trading a little accuracy for much faster training."""
+        older history), trading a little accuracy for much faster training.
+        `chunk_series` bounds peak memory while building features (no effect on results)."""
         self.num_boost_round = num_boost_round
         self.train_days = train_days
+        self.chunk_series = chunk_series
         self.params = {**DEFAULT_PARAMS, **params}
         self.booster: lgb.Booster | None = None
 
@@ -43,15 +47,41 @@ class LGBMForecaster(ForecastModel):
         self._cutoff = train["date"].max()
         self._categories = {c: train[c].astype("category").cat.categories for c in CATEGORICAL}
 
-        feats = add_features(train)
-        feats = feats[feats[f"lag_{MIN_LAG}"].notna()]
+        # Only build features for rows we train on, plus the history they look back into,
+        # and do it in chunks of series so the full-width feature frame never exists at once.
+        # Feature values are identical either way (features never cross series).
+        source = train
+        first_day = None
         if self.train_days:
-            feats = feats[feats["date"] > self._cutoff - pd.Timedelta(days=self.train_days)]
+            first_day = self._cutoff - pd.Timedelta(days=self.train_days)
+            source = train[train["date"] > first_day - pd.Timedelta(days=LOOKBACK_DAYS)]
+        # Count training rows up front (a row trains once it has MIN_LAG days of history) so
+        # the float32 design matrix is allocated once and filled chunk by chunk.
+        position = source.groupby("id", observed=True, sort=False).cumcount().to_numpy()
+        trains = position >= MIN_LAG
+        if first_day is not None:
+            trains &= (source["date"] > first_day).to_numpy()
+        X = np.empty((int(trains.sum()), len(FEATURES)), dtype="float32")
+        y = np.empty(len(X), dtype="float32")
 
-        dataset = lgb.Dataset(
-            self._encode(feats[FEATURES]), label=feats["sales"],
-            categorical_feature=CATEGORICAL, free_raw_data=True,
-        )
+        ids = source["id"].unique()
+        filled = 0
+        for i in range(0, len(ids), self.chunk_series):
+            part = add_features(source[source["id"].isin(ids[i:i + self.chunk_series])])
+            keep = part[f"lag_{MIN_LAG}"].notna()
+            if first_day is not None:
+                keep &= part["date"] > first_day
+            part = part[keep]
+            X[filled:filled + len(part)] = self._matrix(part)
+            y[filled:filled + len(part)] = part["sales"].to_numpy(dtype="float32")
+            filled += len(part)
+            del part
+        assert filled == len(X), "training row count mismatch"
+        del source, position, trains
+
+        dataset = lgb.Dataset(X, label=y, feature_name=FEATURES,
+                              categorical_feature=CATEGORICAL, free_raw_data=True).construct()
+        del X, y  # LightGBM now holds its own compact binned copy
         self.booster = lgb.train(self.params, dataset, num_boost_round=self.num_boost_round)
 
         # Keep only the tail of history that predict() needs to rebuild features.
@@ -74,14 +104,21 @@ class LGBMForecaster(ForecastModel):
         feats = add_features(combined)
         feats = feats[feats["date"] > self._cutoff]
 
-        yhat = self.booster.predict(self._encode(feats[FEATURES]))
+        yhat = self.booster.predict(self._matrix(feats))
         rows = feats["_row"].astype("int64").to_numpy()
         return pd.Series(yhat, index=rows, name="yhat").reindex(future.index)
 
-    def _encode(self, X: pd.DataFrame) -> pd.DataFrame:
-        X = X.copy()
-        for c in CATEGORICAL:
-            X[c] = pd.Categorical(X[c].astype("object"), categories=self._categories[c])
+    def _matrix(self, feats: pd.DataFrame) -> np.ndarray:
+        """float32 design matrix in FEATURES order. Categoricals become their code in the
+        training categories; unseen values become NaN, which LightGBM treats as missing."""
+        X = np.empty((len(feats), len(FEATURES)), dtype="float32")
+        for j, col in enumerate(FEATURES):
+            if col in self._categories:
+                codes = pd.Categorical(feats[col].astype("object"),
+                                       categories=self._categories[col]).codes
+                X[:, j] = np.where(codes < 0, np.nan, codes)
+            else:
+                X[:, j] = feats[col].to_numpy(dtype="float32", na_value=np.nan)
         return X
 
     def feature_importance(self) -> pd.DataFrame:

@@ -8,6 +8,7 @@ import pandas as pd
 
 from forecast.api.prediction_log import PredictionLog
 from forecast.config import Config
+from forecast.data.ingest import read_processed
 from forecast.monitoring.performance import join_forecasts_to_actuals
 from forecast.monitoring.store import MonitoringStore
 
@@ -52,7 +53,7 @@ def scored_forecasts(cfg: Config) -> pd.DataFrame:
     preds = PredictionLog(log_path).read()
     if preds.empty:
         return pd.DataFrame()
-    actuals = pd.read_parquet(data_path, columns=["id", "date", "sales"])
+    actuals = read_processed(data_path, ["id", "date", "sales"])
     end = min(preds["date"].max(), actuals["date"].max())
     window = (end - preds["date"].min()).days + 1
     return join_forecasts_to_actuals(preds, actuals, end, window)
@@ -68,7 +69,7 @@ def daily_totals(scored: pd.DataFrame) -> pd.DataFrame:
 
 def series_view(cfg: Config, series_id: str, since: pd.Timestamp | None = None) -> pd.DataFrame:
     """Actual sales plus each model version's forecast for one series, long format."""
-    actuals = pd.read_parquet(cfg.resolve(cfg.data.processed_path), columns=["id", "date", "sales"])
+    actuals = read_processed(cfg.resolve(cfg.data.processed_path), ["id", "date", "sales"])
     actuals = actuals[actuals["id"].astype(str) == series_id]
     preds = PredictionLog(cfg.resolve(cfg.serving.prediction_log)).read()
     preds = preds[preds["series_id"] == series_id]

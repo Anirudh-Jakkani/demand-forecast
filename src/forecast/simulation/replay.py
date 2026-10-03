@@ -21,6 +21,7 @@ import yaml
 from prefect import flow, get_run_logger
 
 from forecast.config import PROJECT_ROOT, Config
+from forecast.data.ingest import read_processed
 from forecast.flows.monitoring import monitoring_flow
 from forecast.flows.training import training_flow
 
@@ -78,7 +79,7 @@ def prepare_workspace(base: Config, workdir: Path, start: str, days: int,
     workdir.mkdir(parents=True)
 
     cfg = sim_config(base, workdir)
-    df = pd.read_parquet(base.resolve(base.data.processed_path))
+    df = read_processed(base.resolve(base.data.processed_path))
     if shock:
         df = shock.apply(df)
     df.to_parquet(cfg.data.processed_path, index=False)
@@ -114,7 +115,7 @@ def replay_flow(config_path: str, start: str, days: int, model: str = "lightgbm"
 def run_replay(base: Config, start: str, days: int, shock: Shock | None = None,
                model: str = "lightgbm", weekly_retrain: bool = False,
                workdir: Path = DEFAULT_WORKDIR) -> list[dict]:
-    dates = pd.read_parquet(base.resolve(base.data.processed_path), columns=["date"])["date"]
+    dates = read_processed(base.resolve(base.data.processed_path), ["date"])["date"]
     data_end = dates.max()
     if pd.Timestamp(start) + pd.Timedelta(days=days) > data_end:
         raise ValueError(f"start + days goes past the last day of data ({data_end.date()})")

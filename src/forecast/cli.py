@@ -24,7 +24,7 @@ import time
 import pandas as pd
 
 from forecast.config import load_config
-from forecast.data.ingest import run_ingest
+from forecast.data.ingest import read_processed, run_ingest
 from forecast.data.synthetic import make_synthetic_m5
 from forecast.data.validate import validate_long
 from forecast.evaluation.backtest import run_backtest
@@ -52,7 +52,7 @@ def cmd_ingest(cfg, args) -> None:
 
 
 def cmd_backtest(cfg, args) -> None:
-    df = pd.read_parquet(cfg.resolve(cfg.data.processed_path))
+    df = read_processed(cfg.resolve(cfg.data.processed_path))
     validate_long(df)
     bt = cfg.backtest
     data_info = {
@@ -94,7 +94,7 @@ def cmd_backtest(cfg, args) -> None:
 def cmd_train(cfg, args) -> None:
     from forecast.registry import train_and_register
 
-    df = pd.read_parquet(cfg.resolve(cfg.data.processed_path))
+    df = read_processed(cfg.resolve(cfg.data.processed_path))
     validate_long(df)
     out = train_and_register(cfg, df, args.model, promote=not args.no_promote)
     status = "PROMOTED to champion" if out.promoted else "not promoted"
@@ -147,7 +147,7 @@ def cmd_pipeline(cfg, args) -> None:
 def cmd_simulate(cfg, args) -> None:
     from forecast.simulation.replay import Shock, run_replay
 
-    df_dates = pd.read_parquet(cfg.resolve(cfg.data.processed_path), columns=["date"])["date"]
+    df_dates = read_processed(cfg.resolve(cfg.data.processed_path), ["date"])["date"]
     end = df_dates.max()
     start = pd.Timestamp(args.start) if args.start else end - pd.Timedelta(days=args.days)
     shock = None

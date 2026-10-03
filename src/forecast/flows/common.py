@@ -8,6 +8,7 @@ import pandas as pd
 
 from forecast.api.prediction_log import PredictionLog
 from forecast.config import Config, load_config
+from forecast.data.ingest import read_processed
 
 
 def get_config(config_path: str | None) -> Config:
@@ -17,7 +18,7 @@ def get_config(config_path: str | None) -> Config:
 def load_until(cfg: Config, as_of: str | None) -> tuple[pd.DataFrame, pd.Timestamp]:
     """All processed data visible on `as_of` (default: everything). In production as_of is
     today; in a replay it lets us pretend we are standing on an earlier day."""
-    df = pd.read_parquet(cfg.resolve(cfg.data.processed_path))
+    df = read_processed(cfg.resolve(cfg.data.processed_path))
     as_of_ts = pd.Timestamp(as_of) if as_of else df["date"].max()
     return df[df["date"] <= as_of_ts].reset_index(drop=True), as_of_ts
 

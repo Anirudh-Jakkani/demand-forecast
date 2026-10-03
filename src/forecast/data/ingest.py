@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 log = logging.getLogger(__name__)
@@ -26,50 +27,93 @@ def load_m5_long(
     category: str = "FOODS",
     start_date: str | None = None,
 ) -> pd.DataFrame:
+    """Built straight from arrays (no melt/merge) so the full M5 slice fits in a few
+    hundred MB: the wide file is read in filtered int16 chunks, calendar fields are tiled
+    per series, and prices come from a (series x week) lookup table."""
     raw_dir = Path(raw_dir)
     calendar = pd.read_csv(raw_dir / CALENDAR_FILE, parse_dates=["date"])
     if start_date is not None:
         calendar = calendar[calendar["date"] >= pd.Timestamp(start_date)]
-    day_cols = calendar["d"].tolist()
 
-    # Only read the day columns we keep; the full file is ~120 MB wide.
+    # Only read the day columns we keep, as int16, filtering rows chunk by chunk.
     header = pd.read_csv(raw_dir / SALES_FILE, nrows=0).columns
-    usecols = ID_COLS + [d for d in day_cols if d in header]
-    sales = pd.read_csv(raw_dir / SALES_FILE, usecols=usecols)
-    sales = sales[(sales["state_id"] == state) & (sales["cat_id"] == category)]
+    calendar = calendar[calendar["d"].isin(header)].reset_index(drop=True)
+    day_cols = calendar["d"].tolist()
+    chunks = pd.read_csv(raw_dir / SALES_FILE, usecols=ID_COLS + day_cols,
+                         dtype={d: "int16" for d in day_cols}, chunksize=5000)
+    sales = pd.concat(
+        [c[(c["state_id"] == state) & (c["cat_id"] == category)] for c in chunks],
+        ignore_index=True,
+    )
     if sales.empty:
         raise ValueError(f"No series found for state={state!r}, category={category!r}")
-    log.info("Selected %d series", len(sales))
+    sales = sales.sort_values("id", ignore_index=True)
+    n_series, n_days = len(sales), len(day_cols)
+    log.info("Selected %d series x %d days", n_series, n_days)
 
-    long = sales.melt(id_vars=ID_COLS, var_name="d", value_name="sales")
-    long = long.drop(columns=["cat_id", "state_id"])
+    def per_series(col: str) -> pd.Categorical:
+        cats = pd.Categorical(sales[col])
+        return pd.Categorical.from_codes(np.repeat(cats.codes, n_days), cats.categories)
 
-    cal_cols = ["d", "date", "wm_yr_wk", "wday", "month", "year",
-                "event_name_1", "event_type_1", f"snap_{state}"]
-    long = long.merge(calendar[cal_cols], on="d", how="left")
-    long = long.rename(columns={f"snap_{state}": "snap"})
+    def per_day(values) -> np.ndarray:
+        return np.tile(np.asarray(values), n_series)
 
-    prices = pd.read_csv(raw_dir / PRICES_FILE)
-    prices = prices[prices["store_id"].isin(long["store_id"].unique())]
-    long = long.merge(prices, on=["store_id", "item_id", "wm_yr_wk"], how="left")
+    def per_day_cat(col: str) -> pd.Categorical:
+        cats = pd.Categorical(calendar[col])
+        return pd.Categorical.from_codes(per_day(cats.codes), cats.categories)
+
+    long = pd.DataFrame({
+        "id": per_series("id"),
+        "item_id": per_series("item_id"),
+        "dept_id": per_series("dept_id"),
+        "store_id": per_series("store_id"),
+        "date": per_day(calendar["date"].to_numpy()),
+        "sales": sales[day_cols].to_numpy(dtype="float32").ravel(),
+        "wday": per_day(calendar["wday"].to_numpy(dtype="int8")),
+        "month": per_day(calendar["month"].to_numpy(dtype="int8")),
+        "year": per_day(calendar["year"].to_numpy(dtype="int16")),
+        "event_name_1": per_day_cat("event_name_1"),
+        "event_type_1": per_day_cat("event_type_1"),
+        "snap": per_day(calendar[f"snap_{state}"].to_numpy(dtype="int8")),
+        "sell_price": _price_matrix(raw_dir, sales, calendar).ravel(),
+    })
 
     # No price means the item was not on the shelf yet: those zeros are not real demand.
-    before = len(long)
-    long = long.dropna(subset=["sell_price"])
-    log.info("Dropped %d pre-launch rows", before - len(long))
-
-    long = long.drop(columns=["d", "wm_yr_wk"])
-    return _optimize_dtypes(long).sort_values(["id", "date"]).reset_index(drop=True)
+    on_shelf = long["sell_price"].notna()
+    log.info("Dropped %d pre-launch rows", int((~on_shelf).sum()))
+    return long[on_shelf].reset_index(drop=True)
 
 
-def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-    for col in ["id", "item_id", "dept_id", "store_id", "event_name_1", "event_type_1"]:
-        df[col] = df[col].astype("category")
-    df["sales"] = df["sales"].astype("float32")
-    df["sell_price"] = df["sell_price"].astype("float32")
-    for col in ["wday", "month", "snap"]:
-        df[col] = df[col].astype("int8")
-    df["year"] = df["year"].astype("int16")
+def _price_matrix(raw_dir: Path, sales: pd.DataFrame, calendar: pd.DataFrame) -> np.ndarray:
+    """(n_series, n_days) float32 sell prices; NaN where the item had no price that week."""
+    weeks = pd.Index(calendar["wm_yr_wk"].unique())
+    series = pd.MultiIndex.from_arrays([sales["store_id"], sales["item_id"]])
+    prices = pd.read_csv(raw_dir / PRICES_FILE,
+                         dtype={"store_id": "category", "item_id": "category",
+                                "wm_yr_wk": "int32", "sell_price": "float32"})
+    prices = prices[prices["wm_yr_wk"].isin(weeks)]
+    row = series.get_indexer(pd.MultiIndex.from_arrays(
+        [prices["store_id"].astype(str), prices["item_id"].astype(str)]))
+    found = row >= 0
+    by_week = np.full((len(sales), len(weeks)), np.nan, dtype="float32")
+    by_week[row[found], weeks.get_indexer(prices["wm_yr_wk"])[found]] = \
+        prices["sell_price"].to_numpy()[found]
+    return by_week[:, weeks.get_indexer(calendar["wm_yr_wk"])]
+
+
+def read_processed(path: Path, columns: list[str] | None = None) -> pd.DataFrame:
+    """Load the processed table without Arrow keeping a second copy alive.
+
+    Plain `pd.read_parquet` leaves the Arrow buffers and allocator slack resident
+    (~3x the frame size); on an 8 GB machine that headroom matters for training.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(path, columns=columns)
+    df = table.to_pandas(split_blocks=True, self_destruct=True)
+    del table
+    pa.default_memory_pool().release_unused()
     return df
 
 
