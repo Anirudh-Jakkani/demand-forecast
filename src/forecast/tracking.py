@@ -1,12 +1,14 @@
-"""MLflow logging for backtest runs."""
+"""MLflow setup and logging for backtest and training runs."""
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
 import matplotlib
 
+os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import mlflow  # noqa: E402
@@ -15,12 +17,22 @@ from forecast.config import PROJECT_ROOT, Config  # noqa: E402
 from forecast.evaluation.backtest import BacktestResult  # noqa: E402
 
 
-def setup_mlflow(cfg: Config) -> None:
+def tracking_uri(cfg: Config) -> str:
     uri = cfg.mlflow.tracking_uri
     # Anchor relative sqlite paths to the project root so runs land in one place.
     if uri.startswith("sqlite:///") and not Path(uri.removeprefix("sqlite:///")).is_absolute():
         uri = f"sqlite:///{(PROJECT_ROOT / uri.removeprefix('sqlite:///')).as_posix()}"
-    mlflow.set_tracking_uri(uri)
+    return uri
+
+
+def setup_mlflow(cfg: Config) -> None:
+    mlflow.set_tracking_uri(tracking_uri(cfg))
+    client = mlflow.MlflowClient()
+    if client.get_experiment_by_name(cfg.mlflow.experiment) is None:
+        # Pin artifacts to a fixed folder instead of "wherever the process was started".
+        root = cfg.resolve(cfg.mlflow.artifact_root)
+        root.mkdir(parents=True, exist_ok=True)
+        client.create_experiment(cfg.mlflow.experiment, artifact_location=root.as_uri())
     mlflow.set_experiment(cfg.mlflow.experiment)
 
 
@@ -31,25 +43,29 @@ def log_backtest(
         mlflow.set_tag("model", model_name)
         mlflow.set_tag("stage", "backtest")
         mlflow.log_params({**params, **cfg.backtest.model_dump(), **data_info})
-
-        for row in result.fold_metrics.itertuples(index=False):
-            for metric in ("wape", "mae", "rmse", "bias", "rmsse"):
-                mlflow.log_metric(f"fold_{metric}", getattr(row, metric), step=row.fold)
-        mlflow.log_metrics({f"cv_{k}": v for k, v in result.summary.items()})
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fold_csv = Path(tmp) / "fold_metrics.csv"
-            result.fold_metrics.to_csv(fold_csv, index=False)
-            mlflow.log_artifact(str(fold_csv))
-            mlflow.log_figure(plot_backtest(result), "backtest_total_sales.png")
-
-            if hasattr(result.last_model, "feature_importance"):
-                imp = result.last_model.feature_importance()
-                imp_csv = Path(tmp) / "feature_importance.csv"
-                imp.to_csv(imp_csv, index=False)
-                mlflow.log_artifact(str(imp_csv))
-                mlflow.log_figure(plot_importance(imp), "feature_importance.png")
+        log_backtest_details(result)
         return run.info.run_id
+
+
+def log_backtest_details(result: BacktestResult) -> None:
+    """Per-fold + mean metrics and diagnostic artifacts, into the active run."""
+    for row in result.fold_metrics.itertuples(index=False):
+        for metric in ("wape", "mae", "rmse", "bias", "rmsse"):
+            mlflow.log_metric(f"fold_{metric}", getattr(row, metric), step=row.fold)
+    mlflow.log_metrics({f"cv_{k}": v for k, v in result.summary.items()})
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fold_csv = Path(tmp) / "fold_metrics.csv"
+        result.fold_metrics.to_csv(fold_csv, index=False)
+        mlflow.log_artifact(str(fold_csv))
+        mlflow.log_figure(plot_backtest(result), "backtest_total_sales.png")
+
+        if hasattr(result.last_model, "feature_importance"):
+            imp = result.last_model.feature_importance()
+            imp_csv = Path(tmp) / "feature_importance.csv"
+            imp.to_csv(imp_csv, index=False)
+            mlflow.log_artifact(str(imp_csv))
+            mlflow.log_figure(plot_importance(imp), "feature_importance.png")
 
 
 def plot_backtest(result: BacktestResult):

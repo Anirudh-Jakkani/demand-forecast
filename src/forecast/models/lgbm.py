@@ -63,8 +63,10 @@ class LGBMForecaster(ForecastModel):
         if horizon > MIN_LAG:
             raise ValueError(f"Horizon {horizon}d exceeds MIN_LAG={MIN_LAG}d: features would leak")
 
+        # Only rebuild features for the requested series: keeps single-item API calls fast.
+        history = self._history[self._history["id"].isin(future["id"].unique())]
         combined = pd.concat(
-            [self._history, future.assign(sales=float("nan"), _row=future.index)],
+            [history, future.assign(sales=float("nan"), _row=future.index)],
             ignore_index=True,
         )
         for c in CATEGORICAL:  # concat can widen categories; keep the training set

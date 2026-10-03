@@ -12,9 +12,9 @@ and a served API.
 | 1 | Ingest + validation (M5 → long Parquet) | done |
 | 2 | Rolling-origin backtest harness, metrics, baselines, MLflow tracking | done |
 | 3a | Global LightGBM (lags / rolling / price / calendar), Tweedie loss | done |
-| 3b | Prophet or N-BEATS | next |
-| 4 | MLflow registry + champion promotion, FastAPI serving | |
-| 5 | Prefect training + monitoring flows | |
+| 3b | Prophet or N-BEATS | later |
+| 4 | MLflow registry + champion promotion, FastAPI serving | done |
+| 5 | Prefect training + monitoring flows | next |
 | 6 | Evidently drift, replay simulation, Streamlit dashboard | |
 | 7 | Docker Compose, GitHub Actions CI | |
 
@@ -35,6 +35,26 @@ uv run forecast ingest
 uv run forecast backtest -m seasonal_naive -m moving_average -m lightgbm
 uv run mlflow ui --backend-store-uri sqlite:///mlflow.db   # http://127.0.0.1:5000
 ```
+
+### Train, register, serve
+
+```bash
+uv run forecast train -m lightgbm     # backtest -> fit on all data -> register -> maybe promote
+uv run forecast versions              # versions, aliases (champion / challenger), scores, reasons
+uv run forecast promote 2             # manual promotion or rollback
+uv run forecast serve                 # API docs at http://127.0.0.1:8000/docs
+```
+
+```bash
+curl -X POST localhost:8000/predict -H "Content-Type: application/json"   -d '{"items": [{"store_id": "CA_1", "item_id": "FOODS_1_002"}], "horizon": 7}'
+```
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | liveness + whether a model is loaded |
+| `GET /model-info` | serving version, model type, data end date, backtest WAPE, why it was promoted |
+| `POST /predict` | forecasts for up to 1000 store/item pairs, 1..28 days; every forecast is logged |
+| `POST /admin/reload` | check for a new champion now (it is also polled every 60s) |
 
 ### Run on real M5 data
 
@@ -62,6 +82,16 @@ start date) and backtest settings live in [`configs/config.yaml`](configs/config
   ([`features/build.py`](src/forecast/features/build.py)), so the full 28-day horizon is
   predicted directly with no recursion and no leakage; a test scrambles post-cutoff sales and
   asserts no in-horizon feature changes. Hyperparameters live in `configs/config.yaml`.
+- **Registry and promotion** ([`registry.py`](src/forecast/registry.py)). A *recipe* is a model
+  type + hyperparameters. First model becomes `champion`; a retrain of the champion's recipe on
+  newer data is promoted as a refresh; a different recipe must beat the champion's recipe by
+  >= 1% WAPE when both are backtested on the same data and folds, otherwise it is registered
+  as `challenger`. `forecast promote <v>` is the manual override / rollback.
+- **Deployable bundle** ([`serving_model.py`](src/forecast/serving_model.py)): the fitted model
+  plus a *future frame* (calendar, events, SNAP and planned prices for the next 28 days), logged
+  as an MLflow pyfunc. The API loads it by alias and swaps it in-place when the alias moves.
+- **Prediction log** (`data/predictions.sqlite`): every served forecast with its model version,
+  ready to be joined against actual sales for monitoring.
 - **Pre-launch rows dropped.** Days before an item has a price are not real zero demand.
 
 ## Layout
@@ -69,10 +99,13 @@ start date) and backtest settings live in [`configs/config.yaml`](configs/config
 ```
 configs/config.yaml        scope, backtest and MLflow settings
 src/forecast/
-  data/                    ingest, validation, synthetic sample generator
+  data/                    ingest, validation, future frame, synthetic sample generator
   evaluation/              metrics, backtest
   features/                leak-safe feature engineering
   models/                  ForecastModel interface, baselines, LightGBM
+  api/                     FastAPI app, request/response schemas, prediction log
+  registry.py              train -> register -> promote, champion loading
+  serving_model.py         deployable model bundle (MLflow pyfunc)
   tracking.py              MLflow logging
   cli.py                   `forecast` command
 tests/

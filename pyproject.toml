@@ -13,12 +13,13 @@ dependencies = [
     "mlflow>=2.14",
     "matplotlib>=3.8",
     "lightgbm>=4.3",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
 ]
 
 [project.optional-dependencies]
 # Added in later phases; kept here so the full stack is visible up front.
 models = ["prophet>=1.1.5", "optuna>=3.6"]
-serve = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 pipeline = ["prefect>=3.0"]
 monitor = ["evidently>=0.4", "streamlit>=1.33"]
 
@@ -26,7 +27,7 @@ monitor = ["evidently>=0.4", "streamlit>=1.33"]
 forecast = "forecast.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.4"]
+dev = ["pytest>=8", "ruff>=0.4", "httpx>=0.27"]
 
 [build-system]
 requires = ["hatchling"]

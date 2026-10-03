@@ -3,6 +3,10 @@
     forecast make-sample          # synthetic M5-shaped data -> data/raw
     forecast ingest               # raw CSVs -> processed parquet
     forecast backtest -m seasonal_naive -m lightgbm
+    forecast train -m lightgbm    # backtest, fit on all data, register, maybe promote
+    forecast versions             # registry: versions, aliases, scores
+    forecast promote 3            # manual promote / rollback
+    forecast serve                # FastAPI on http://127.0.0.1:8000/docs
 """
 
 from __future__ import annotations
@@ -80,6 +84,39 @@ def cmd_backtest(cfg, args) -> None:
     print(table.round(4).to_string())
 
 
+def cmd_train(cfg, args) -> None:
+    from forecast.registry import train_and_register
+
+    df = pd.read_parquet(cfg.resolve(cfg.data.processed_path))
+    validate_long(df)
+    out = train_and_register(cfg, df, args.model, promote=not args.no_promote)
+    status = "PROMOTED to champion" if out.promoted else "not promoted"
+    print(f"\n{cfg.registry.model_name} v{out.version} ({args.model}): "
+          f"cv WAPE {out.cv_wape:.4f} -> {status}\n  reason: {out.reason}")
+
+
+def cmd_versions(cfg, args) -> None:
+    from forecast.registry import list_versions
+
+    table = list_versions(cfg)
+    print(table.to_string(index=False) if len(table) else "No registered versions yet.")
+
+
+def cmd_promote(cfg, args) -> None:
+    from forecast.registry import promote_version
+
+    promote_version(cfg, args.version)
+    print(f"{cfg.registry.model_name} v{args.version} is now the champion")
+
+
+def cmd_serve(cfg, args) -> None:
+    import uvicorn
+
+    from forecast.api.app import create_app
+
+    uvicorn.run(create_app(cfg), host=args.host, port=args.port)
+
+
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(prog="forecast")
@@ -98,6 +135,23 @@ def main(argv: list[str] | None = None) -> None:
                    help="repeatable: -m seasonal_naive -m lightgbm (default: seasonal_naive)")
     p.add_argument("--no-mlflow", action="store_true", help="skip MLflow logging")
     p.set_defaults(func=cmd_backtest)
+
+    p = sub.add_parser("train", help="backtest, fit on all data, register, and maybe promote")
+    p.add_argument("-m", "--model", choices=sorted(MODELS), default="lightgbm")
+    p.add_argument("--no-promote", action="store_true", help="register only")
+    p.set_defaults(func=cmd_train)
+
+    p = sub.add_parser("versions", help="list registered model versions")
+    p.set_defaults(func=cmd_versions)
+
+    p = sub.add_parser("promote", help="point the champion alias at a version")
+    p.add_argument("version")
+    p.set_defaults(func=cmd_promote)
+
+    p = sub.add_parser("serve", help="run the forecast API")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
+    p.set_defaults(func=cmd_serve)
 
     args = parser.parse_args(argv)
     cfg = load_config(args.config) if args.config else load_config()

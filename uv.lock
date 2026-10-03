@@ -763,6 +763,7 @@ name = "demand-forecast-mlops"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastapi" },
     { name = "lightgbm" },
     { name = "matplotlib" },
     { name = "mlflow" },
@@ -772,6 +773,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.optional-dependencies]
@@ -786,13 +788,10 @@ monitor = [
 pipeline = [
     { name = "prefect" },
 ]
-serve = [
-    { name = "fastapi" },
-    { name = "uvicorn", extra = ["standard"] },
-]
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -800,7 +799,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "evidently", marker = "extra == 'monitor'", specifier = ">=0.4" },
-    { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.110" },
+    { name = "fastapi", specifier = ">=0.110" },
     { name = "lightgbm", specifier = ">=4.3" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "mlflow", specifier = ">=2.14" },
@@ -813,12 +812,13 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.6" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "streamlit", marker = "extra == 'monitor'", specifier = ">=1.33" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'serve'", specifier = ">=0.29" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
-provides-extras = ["models", "serve", "pipeline", "monitor"]
+provides-extras = ["models", "pipeline", "monitor"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.4" },
 ]

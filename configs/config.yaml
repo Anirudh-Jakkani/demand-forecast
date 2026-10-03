@@ -25,3 +25,12 @@ models:                          # constructor kwargs per model; omitted ones us
 mlflow:
   tracking_uri: sqlite:///mlflow.db
   experiment: m5-demand-forecast
+  artifact_root: mlruns
+
+registry:
+  model_name: m5-demand-forecaster
+  min_improvement: 0.01          # a new recipe must beat the champion's WAPE by >= 1%
+
+serving:
+  prediction_log: data/predictions.sqlite   # every served forecast, for monitoring later
+  reload_interval_s: 60          # how often the API checks for a new champion

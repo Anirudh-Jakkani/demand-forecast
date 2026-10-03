@@ -29,6 +29,18 @@ class BacktestConfig(BaseModel):
 class MlflowConfig(BaseModel):
     tracking_uri: str = "sqlite:///mlflow.db"
     experiment: str = "m5-demand-forecast"
+    artifact_root: Path = Path("mlruns")
+
+
+class RegistryConfig(BaseModel):
+    model_name: str = "m5-demand-forecaster"
+    # A different model recipe must beat the champion's backtest WAPE by this fraction.
+    min_improvement: float = 0.01
+
+
+class ServingConfig(BaseModel):
+    prediction_log: Path = Path("data/predictions.sqlite")
+    reload_interval_s: int = 60
 
 
 class Config(BaseModel):
@@ -36,6 +48,8 @@ class Config(BaseModel):
     backtest: BacktestConfig = BacktestConfig()
     models: dict[str, dict[str, Any]] = {}
     mlflow: MlflowConfig = MlflowConfig()
+    registry: RegistryConfig = RegistryConfig()
+    serving: ServingConfig = ServingConfig()
 
     def resolve(self, path: Path) -> Path:
         """Relative paths in the config are relative to the project root."""
