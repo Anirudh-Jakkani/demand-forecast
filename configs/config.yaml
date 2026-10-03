@@ -1,0 +1,15 @@
+data:
+  raw_dir: data/raw              # M5 CSVs: sales_train_evaluation.csv, calendar.csv, sell_prices.csv
+  processed_path: data/processed/m5_ca_foods.parquet
+  state: CA
+  category: FOODS
+  start_date: "2013-01-01"       # trim early history to keep memory modest
+
+backtest:
+  horizon: 28                    # days forecast per fold (M5 standard)
+  n_folds: 4                     # rolling-origin folds, stepping back `step` days each
+  step: 28
+
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  experiment: m5-demand-forecast

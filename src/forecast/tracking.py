@@ -1,0 +1,61 @@
+"""MLflow logging for backtest runs."""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import mlflow  # noqa: E402
+
+from forecast.config import PROJECT_ROOT, Config  # noqa: E402
+from forecast.evaluation.backtest import BacktestResult  # noqa: E402
+
+
+def setup_mlflow(cfg: Config) -> None:
+    uri = cfg.mlflow.tracking_uri
+    # Anchor relative sqlite paths to the project root so runs land in one place.
+    if uri.startswith("sqlite:///") and not Path(uri.removeprefix("sqlite:///")).is_absolute():
+        uri = f"sqlite:///{(PROJECT_ROOT / uri.removeprefix('sqlite:///')).as_posix()}"
+    mlflow.set_tracking_uri(uri)
+    mlflow.set_experiment(cfg.mlflow.experiment)
+
+
+def log_backtest(
+    model_name: str, params: dict, result: BacktestResult, cfg: Config, data_info: dict
+) -> str:
+    with mlflow.start_run(run_name=model_name) as run:
+        mlflow.set_tag("model", model_name)
+        mlflow.set_tag("stage", "backtest")
+        mlflow.log_params({**params, **cfg.backtest.model_dump(), **data_info})
+
+        for row in result.fold_metrics.itertuples(index=False):
+            for metric in ("wape", "mae", "rmse", "bias", "rmsse"):
+                mlflow.log_metric(f"fold_{metric}", getattr(row, metric), step=row.fold)
+        mlflow.log_metrics({f"cv_{k}": v for k, v in result.summary.items()})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fold_csv = Path(tmp) / "fold_metrics.csv"
+            result.fold_metrics.to_csv(fold_csv, index=False)
+            mlflow.log_artifact(str(fold_csv))
+            mlflow.log_figure(plot_backtest(result), "backtest_total_sales.png")
+        return run.info.run_id
+
+
+def plot_backtest(result: BacktestResult):
+    """Total daily units across all series: actual vs forecast, per fold."""
+    daily = result.predictions.groupby(["fold", "date"])[["sales", "yhat"]].sum().reset_index()
+    fig, ax = plt.subplots(figsize=(11, 4))
+    for fold, g in daily.groupby("fold"):
+        ax.plot(g["date"], g["sales"], color="0.3", lw=1.2, label="actual" if fold == 0 else None)
+        ax.plot(g["date"], g["yhat"], color="C0", lw=1.2, label="forecast" if fold == 0 else None)
+        ax.axvline(g["date"].min(), color="0.8", ls="--", lw=0.8)
+    ax.set_ylabel("units / day (all series)")
+    ax.set_title("Backtest: actual vs forecast per fold")
+    ax.legend()
+    fig.tight_layout()
+    plt.close(fig)
+    return fig

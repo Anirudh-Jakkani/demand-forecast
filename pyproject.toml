@@ -1,0 +1,46 @@
+[project]
+name = "demand-forecast-mlops"
+version = "0.1.0"
+description = "Daily store x item demand forecasting (M5) with an end-to-end MLOps stack."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "pyarrow>=15",
+    "pyyaml>=6",
+    "pydantic>=2.6",
+    "mlflow>=2.14",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+# Added in later phases; kept here so the full stack is visible up front.
+models = ["lightgbm>=4.3", "prophet>=1.1.5", "optuna>=3.6"]
+serve = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+pipeline = ["prefect>=3.0"]
+monitor = ["evidently>=0.4", "streamlit>=1.33"]
+
+[project.scripts]
+forecast = "forecast.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.4"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/forecast"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
