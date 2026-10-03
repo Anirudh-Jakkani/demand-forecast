@@ -37,7 +37,7 @@ services:
     <<: *app
     command: >
       mlflow server
-      --backend-store-uri postgresql://${POSTGRES_USER:-forecast}:${POSTGRES_PASSWORD:-forecast}@postgres:5432/mlflow
+      --backend-store-uri postgresql+psycopg://${POSTGRES_USER:-forecast}:${POSTGRES_PASSWORD:-forecast}@postgres:5432/mlflow
       --artifacts-destination /app/mlartifacts --serve-artifacts
       --host 0.0.0.0 --port 5000 --allowed-hosts "*"
     volumes:
@@ -55,6 +55,8 @@ services:
     command: prefect server start --host 0.0.0.0 --port 4200
     environment:
       <<: *env
+      # The package dir is read-only for the non-root user; build the UI somewhere writable.
+      PREFECT_UI_STATIC_DIRECTORY: /home/app/.prefect/ui
       PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-forecast}:${POSTGRES_PASSWORD:-forecast}@postgres:5432/prefect
     ports: ["4200:4200"]
     depends_on:
