@@ -1,14 +1,19 @@
+# Tooling
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
-data/
-mlruns/
-mlartifacts/
-mlflow.db
 *.egg-info/
 .env
-reports/
-sim/
-sim_run.log
+
+# Generated at runtime. Leading "/" anchors to the repo root: an unanchored "data/"
+# would also ignore the src/forecast/data package.
+/data/
+/mlruns/
+/mlartifacts/
+/mlflow.db
+/reports/
+/sim/
+/sim_run.log
+/.ci-check/
