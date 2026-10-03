@@ -9,3 +9,4 @@ mlartifacts/
 mlflow.db
 *.egg-info/
 .env
+reports/

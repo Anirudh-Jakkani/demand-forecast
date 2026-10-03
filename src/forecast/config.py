@@ -38,6 +38,23 @@ class RegistryConfig(BaseModel):
     min_improvement: float = 0.01
 
 
+class MonitoringConfig(BaseModel):
+    window_days: int = 7               # score live forecasts over the last N days of actuals
+    min_points: int = 100              # don't judge accuracy on fewer forecast/actual pairs
+    max_wape_ratio: float = 1.25       # retrain if live WAPE > ratio x backtest WAPE
+    drift_window_days: int = 28        # size of reference and current windows for drift
+    drift_share_threshold: float = 0.5 # retrain if this share of columns drifted
+    max_model_age_days: int = 35       # retrain if the champion's data is older than this
+    db_path: Path = Path("data/monitoring.sqlite")
+    reports_dir: Path = Path("reports")
+
+
+class ScheduleConfig(BaseModel):
+    training_cron: str = "0 3 * * 1"   # Mondays 03:00
+    monitoring_cron: str = "0 6 * * *" # daily 06:00
+    timezone: str = "UTC"
+
+
 class ServingConfig(BaseModel):
     prediction_log: Path = Path("data/predictions.sqlite")
     reload_interval_s: int = 60
@@ -50,6 +67,8 @@ class Config(BaseModel):
     mlflow: MlflowConfig = MlflowConfig()
     registry: RegistryConfig = RegistryConfig()
     serving: ServingConfig = ServingConfig()
+    monitoring: MonitoringConfig = MonitoringConfig()
+    schedule: ScheduleConfig = ScheduleConfig()
 
     def resolve(self, path: Path) -> Path:
         """Relative paths in the config are relative to the project root."""

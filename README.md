@@ -14,8 +14,8 @@ and a served API.
 | 3a | Global LightGBM (lags / rolling / price / calendar), Tweedie loss | done |
 | 3b | Prophet or N-BEATS | later |
 | 4 | MLflow registry + champion promotion, FastAPI serving | done |
-| 5 | Prefect training + monitoring flows | next |
-| 6 | Evidently drift, replay simulation, Streamlit dashboard | |
+| 5 | Prefect training + monitoring flows, Evidently drift, retrain triggers | done |
+| 6 | Replay simulation with injected drift, Streamlit dashboard | next |
 | 7 | Docker Compose, GitHub Actions CI | |
 
 ## Quickstart
@@ -24,7 +24,8 @@ Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync                              # create .venv and install
-uv run pytest                        # tests run on a synthetic M5-shaped sample
+uv run pytest                        # full suite on a synthetic M5-shaped sample (~4 min)
+uv run pytest -m "not slow"          # skip registry/API/Prefect tests (~20 s)
 ```
 
 ### Run on synthetic data (no download needed)
@@ -55,6 +56,31 @@ curl -X POST localhost:8000/predict -H "Content-Type: application/json"   -d '{"
 | `GET /model-info` | serving version, model type, data end date, backtest WAPE, why it was promoted |
 | `POST /predict` | forecasts for up to 1000 store/item pairs, 1..28 days; every forecast is logged |
 | `POST /admin/reload` | check for a new champion now (it is also polled every 60s) |
+
+### Pipelines (Prefect)
+
+```bash
+uv run forecast pipeline train --as-of 2016-03-31    # run the training flow once
+uv run forecast pipeline monitor --as-of 2016-04-07  # run the monitoring flow once
+```
+
+`--as-of` pretends today is that date (only data up to it is visible), which is how the
+replay simulation works. To run both on a schedule:
+
+```bash
+uv run prefect server start                                         # terminal 1, UI on :4200
+PREFECT_API_URL=http://127.0.0.1:4200/api uv run forecast pipeline serve   # terminal 2
+```
+
+| Flow | Schedule | Steps |
+|---|---|---|
+| `training` | Mondays 03:00 | load data up to as-of -> validate -> backtest, fit, register, promote -> batch-forecast all series into the prediction log |
+| `monitoring` | daily 06:00 | join logged forecasts to arrived actuals (live WAPE, bias, by horizon) -> Evidently drift on sales / price / price change vs the champion's training window -> record the run -> trigger `training` if any rule fires |
+
+Retrain triggers (in `configs/config.yaml`): live WAPE > 1.25x the champion's backtest WAPE
+(given >= 100 scored points), >= 50% of monitored columns drifted, or the champion's data is
+more than 35 days old. Every monitoring run is stored in `data/monitoring.sqlite` and each drift
+check writes an Evidently HTML report to `reports/`.
 
 ### Run on real M5 data
 
@@ -104,6 +130,8 @@ src/forecast/
   features/                leak-safe feature engineering
   models/                  ForecastModel interface, baselines, LightGBM
   api/                     FastAPI app, request/response schemas, prediction log
+  flows/                   Prefect training + monitoring flows, schedules
+  monitoring/              live accuracy, Evidently drift, retrain policy, run store
   registry.py              train -> register -> promote, champion loading
   serving_model.py         deployable model bundle (MLflow pyfunc)
   tracking.py              MLflow logging

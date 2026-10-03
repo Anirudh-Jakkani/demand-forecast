@@ -3,30 +3,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from forecast.api.app import create_app
-from forecast.config import (
-    BacktestConfig,
-    Config,
-    DataConfig,
-    MlflowConfig,
-    RegistryConfig,
-    ServingConfig,
-)
 from forecast.data.future import build_future_frame
 from forecast.registry import list_versions, promote_version, train_and_register
-
-FAST_LGBM = {"num_boost_round": 30, "num_leaves": 15, "min_data_in_leaf": 20, "train_days": None}
-
-
-def make_cfg(tmp_path, raw_dir) -> Config:
-    return Config(
-        data=DataConfig(raw_dir=raw_dir, processed_path=tmp_path / "data.parquet"),
-        backtest=BacktestConfig(horizon=28, n_folds=2, step=28),
-        models={"lightgbm": FAST_LGBM},
-        mlflow=MlflowConfig(tracking_uri=f"sqlite:///{(tmp_path / 'mlflow.db').as_posix()}",
-                            experiment="test", artifact_root=tmp_path / "mlruns"),
-        registry=RegistryConfig(model_name="test-forecaster", min_improvement=0.01),
-        serving=ServingConfig(prediction_log=tmp_path / "pred.sqlite", reload_interval_s=3600),
-    )
+from tests.conftest import make_cfg
 
 
 def test_future_frame_covers_horizon_for_live_series(long_df, raw_dir):
@@ -39,6 +18,7 @@ def test_future_frame_covers_horizon_for_live_series(long_df, raw_dir):
     assert "sales" not in fut.columns
 
 
+@pytest.mark.slow
 def test_promotion_rules(tmp_path, raw_dir, long_df):
     cfg = make_cfg(tmp_path, raw_dir)
 
@@ -74,6 +54,7 @@ def api(tmp_path_factory, raw_dir, long_df):
         yield client, cfg
 
 
+@pytest.mark.slow
 def test_health_and_model_info(api):
     client, _ = api
     assert client.get("/health").json() == {"status": "ok", "model_loaded": True}
@@ -83,6 +64,7 @@ def test_health_and_model_info(api):
     assert info["max_horizon"] == 28 and info["n_series"] == 20
 
 
+@pytest.mark.slow
 def test_predict_returns_forecasts_and_logs_them(api):
     client, _ = api
     body = {"items": [{"store_id": "CA_1", "item_id": "FOODS_1_001"},
@@ -99,6 +81,7 @@ def test_predict_returns_forecasts_and_logs_them(api):
     assert len(mine) == 14 and set(mine["model_version"]) == {"1"}
 
 
+@pytest.mark.slow
 def test_predict_errors(api):
     client, _ = api
     unknown = {"items": [{"store_id": "CA_1", "item_id": "NOPE"}]}
@@ -108,6 +91,7 @@ def test_predict_errors(api):
     assert client.post("/predict", json={"items": []}).status_code == 422
 
 
+@pytest.mark.slow
 def test_hot_reload_picks_up_new_champion(api, long_df):
     client, cfg = api
     train_and_register(cfg, long_df, "moving_average", promote=False)

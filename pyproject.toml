@@ -15,13 +15,14 @@ dependencies = [
     "lightgbm>=4.3",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    "prefect>=3.0",
+    "evidently>=0.7",
 ]
 
 [project.optional-dependencies]
 # Added in later phases; kept here so the full stack is visible up front.
 models = ["prophet>=1.1.5", "optuna>=3.6"]
-pipeline = ["prefect>=3.0"]
-monitor = ["evidently>=0.4", "streamlit>=1.33"]
+dashboard = ["streamlit>=1.33"]
 
 [project.scripts]
 forecast = "forecast.cli:main"
@@ -39,6 +40,13 @@ packages = ["src/forecast"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["slow: trains/registers real models or runs Prefect flows (deselect with -m 'not slow')"]
+filterwarnings = [
+    "ignore::DeprecationWarning:sqlalchemy.*",
+    "ignore::sqlalchemy.exc.SADeprecationWarning",
+    "ignore:Using `httpx` with `starlette.testclient`",
+    "ignore:invalid value encountered in divide:RuntimeWarning",
+]
 
 [tool.ruff]
 line-length = 100

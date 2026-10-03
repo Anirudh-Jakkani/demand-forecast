@@ -7,6 +7,9 @@
     forecast versions             # registry: versions, aliases, scores
     forecast promote 3            # manual promote / rollback
     forecast serve                # FastAPI on http://127.0.0.1:8000/docs
+    forecast pipeline train [--as-of 2016-04-24]     # Prefect training flow, run once
+    forecast pipeline monitor [--as-of 2016-05-01]   # Prefect monitoring flow, run once
+    forecast pipeline serve       # schedule both flows (needs `prefect server start`)
 """
 
 from __future__ import annotations
@@ -117,8 +120,30 @@ def cmd_serve(cfg, args) -> None:
     uvicorn.run(create_app(cfg), host=args.host, port=args.port)
 
 
+def cmd_pipeline(cfg, args) -> None:
+    import json
+
+    if args.action == "serve":
+        from forecast.flows.deploy import serve_flows
+
+        serve_flows(cfg, args.config, args.model)
+        return
+    if args.action == "train":
+        from forecast.flows.training import training_flow
+
+        result = training_flow(as_of=args.as_of, model=args.model, config_path=args.config)
+    else:
+        from forecast.flows.monitoring import monitoring_flow
+
+        result = monitoring_flow(as_of=args.as_of, config_path=args.config,
+                                 auto_retrain=not args.no_retrain)
+    print(json.dumps(result, indent=2, default=str))
+
+
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    for noisy in ("httpx", "httpcore", "alembic", "mlflow.utils", "mlflow.store"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(prog="forecast")
     parser.add_argument("--config", default=None, help="path to config.yaml")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -152,6 +177,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("pipeline", help="run or schedule the Prefect flows")
+    p.add_argument("action", choices=["train", "monitor", "serve"])
+    p.add_argument("--as-of", default=None, help="pretend today is this date (YYYY-MM-DD)")
+    p.add_argument("-m", "--model", choices=sorted(MODELS), default="lightgbm",
+                   help="model for the training flow")
+    p.add_argument("--no-retrain", action="store_true",
+                   help="monitor only; don't trigger retraining")
+    p.set_defaults(func=cmd_pipeline)
 
     args = parser.parse_args(argv)
     cfg = load_config(args.config) if args.config else load_config()

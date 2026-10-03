@@ -127,7 +127,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
         fc = bundle.forecast(ids, req.horizon)
         request_id = uuid.uuid4().hex
-        pred_log.write(request_id, dt.datetime.now(dt.UTC).isoformat(), str(version.version), fc)
+        pred_log.write(request_id, dt.datetime.now(dt.UTC).isoformat(), str(version.version),
+                       fc, bundle.cutoff)
 
         forecasts = [
             SeriesForecast(

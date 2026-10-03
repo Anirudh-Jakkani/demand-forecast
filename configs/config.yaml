@@ -34,3 +34,18 @@ registry:
 serving:
   prediction_log: data/predictions.sqlite   # every served forecast, for monitoring later
   reload_interval_s: 60          # how often the API checks for a new champion
+
+monitoring:
+  window_days: 7                 # score live forecasts on the last 7 days of actuals
+  min_points: 100
+  max_wape_ratio: 1.25           # retrain if live WAPE > 1.25x the backtest WAPE
+  drift_window_days: 28
+  drift_share_threshold: 0.5     # retrain if >= half the monitored columns drifted
+  max_model_age_days: 35
+  db_path: data/monitoring.sqlite
+  reports_dir: reports           # Evidently HTML drift reports
+
+schedule:                        # used by `forecast pipeline serve`
+  training_cron: "0 3 * * 1"     # weekly, Monday 03:00
+  monitoring_cron: "0 6 * * *"   # daily 06:00
+  timezone: UTC

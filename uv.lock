@@ -763,6 +763,7 @@ name = "demand-forecast-mlops"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "evidently" },
     { name = "fastapi" },
     { name = "lightgbm" },
     { name = "matplotlib" },
@@ -770,6 +771,7 @@ dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pandas" },
+    { name = "prefect" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -777,16 +779,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+dashboard = [
+    { name = "streamlit" },
+]
 models = [
     { name = "optuna" },
     { name = "prophet" },
-]
-monitor = [
-    { name = "evidently" },
-    { name = "streamlit" },
-]
-pipeline = [
-    { name = "prefect" },
 ]
 
 [package.dev-dependencies]
@@ -798,7 +796,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "evidently", marker = "extra == 'monitor'", specifier = ">=0.4" },
+    { name = "evidently", specifier = ">=0.7" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "lightgbm", specifier = ">=4.3" },
     { name = "matplotlib", specifier = ">=3.8" },
@@ -806,15 +804,15 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "optuna", marker = "extra == 'models'", specifier = ">=3.6" },
     { name = "pandas", specifier = ">=2.2" },
-    { name = "prefect", marker = "extra == 'pipeline'", specifier = ">=3.0" },
+    { name = "prefect", specifier = ">=3.0" },
     { name = "prophet", marker = "extra == 'models'", specifier = ">=1.1.5" },
     { name = "pyarrow", specifier = ">=15" },
     { name = "pydantic", specifier = ">=2.6" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "streamlit", marker = "extra == 'monitor'", specifier = ">=1.33" },
+    { name = "streamlit", marker = "extra == 'dashboard'", specifier = ">=1.33" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
-provides-extras = ["models", "pipeline", "monitor"]
+provides-extras = ["models", "dashboard"]
 
 [package.metadata.requires-dev]
 dev = [
