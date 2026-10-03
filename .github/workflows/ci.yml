@@ -80,19 +80,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Start the stack
-        run: docker compose up -d --no-build
+      - name: Start infrastructure (Postgres, MLflow, Prefect)
+        run: docker compose up -d --no-build --wait --wait-timeout 300 postgres mlflow prefect-server
 
-      - name: Wait for the API (bootstrap trains the first model)
+      - name: Bootstrap (sample data, ingest, train the first champion)
+        run: docker compose run --rm --no-deps bootstrap
+
+      - name: Start the app services
+        run: docker compose up -d --no-build --no-deps api worker dashboard
+
+      - name: Wait for the API to serve a model
         run: |
-          for i in $(seq 1 90); do
+          for i in $(seq 1 60); do
             if curl -fsS localhost:8000/health | grep -q '"model_loaded":true'; then
               echo "API is serving a model"; exit 0
             fi
-            if docker compose ps -a bootstrap --format '{{.State}} {{.ExitCode}}' | grep -q "exited [1-9]"; then
-              echo "bootstrap failed"; exit 1
-            fi
-            sleep 10
+            sleep 5
           done
           echo "timed out waiting for the API"; exit 1
 
@@ -109,7 +112,16 @@ jobs:
 
       - name: Logs on failure
         if: failure()
-        run: docker compose logs --no-color --tail 200
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail 200
+          # Also publish each container's state and log tail as annotations, which are
+          # readable through the public API without signing in.
+          esc() { tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
+          echo "::error title=compose ps::$(docker compose ps -a --format '{{.Service}} {{.State}} {{.Status}}' | esc)"
+          for svc in $(docker compose ps -a --services); do
+            echo "::error title=logs: $svc::$(docker compose logs --no-color --no-log-prefix --tail 40 "$svc" 2>&1 | esc)"
+          done
 
       - name: Stop the stack
         if: always()
