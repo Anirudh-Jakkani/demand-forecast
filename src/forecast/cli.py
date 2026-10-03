@@ -10,6 +10,8 @@
     forecast pipeline train [--as-of 2016-04-24]     # Prefect training flow, run once
     forecast pipeline monitor [--as-of 2016-05-01]   # Prefect monitoring flow, run once
     forecast pipeline serve       # schedule both flows (needs `prefect server start`)
+    forecast simulate             # replay history with an injected shock -> sim/
+    forecast dashboard            # Streamlit model-health dashboard
 """
 
 from __future__ import annotations
@@ -31,7 +33,8 @@ log = logging.getLogger("forecast")
 
 
 def cmd_make_sample(cfg, args) -> None:
-    out = make_synthetic_m5(cfg.resolve(cfg.data.raw_dir), n_days=args.days)
+    out = make_synthetic_m5(cfg.resolve(cfg.data.raw_dir), n_days=args.days,
+                            items_per_dept=args.items)
     log.info("Synthetic M5 sample written to %s", out)
 
 
@@ -140,6 +143,37 @@ def cmd_pipeline(cfg, args) -> None:
     print(json.dumps(result, indent=2, default=str))
 
 
+def cmd_simulate(cfg, args) -> None:
+    from forecast.simulation.replay import Shock, run_replay
+
+    df_dates = pd.read_parquet(cfg.resolve(cfg.data.processed_path), columns=["date"])["date"]
+    end = df_dates.max()
+    start = pd.Timestamp(args.start) if args.start else end - pd.Timedelta(days=args.days)
+    shock = None
+    if args.shock_factor != 1.0 or args.price_factor != 1.0:
+        shock_date = (pd.Timestamp(args.shock_date) if args.shock_date
+                      else start + pd.Timedelta(days=args.days // 2))
+        shock = Shock(str(shock_date.date()), args.shock_factor, args.price_factor, args.dept)
+    print(f"Replaying {args.days} days from {start.date()} with {args.model}; shock: {shock}")
+    results = run_replay(cfg, str(start.date()), args.days, shock, args.model,
+                         args.weekly_retrain)
+    table = pd.DataFrame(results)
+    print(table.to_string(index=False))
+    print("\nOpen the dashboard: uv run forecast dashboard")
+
+
+def cmd_dashboard(cfg, args) -> None:
+    import subprocess
+    import sys
+
+    from forecast.config import PROJECT_ROOT
+
+    app = PROJECT_ROOT / "dashboard" / "app.py"
+    subprocess.run([sys.executable, "-m", "streamlit", "run", str(app),
+                    "--server.port", str(args.port), "--browser.gatherUsageStats", "false"],
+                   check=False)
+
+
 def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     for noisy in ("httpx", "httpcore", "alembic", "mlflow.utils", "mlflow.store"):
@@ -150,6 +184,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("make-sample", help="write synthetic M5-shaped CSVs to data/raw")
     p.add_argument("--days", type=int, default=500)
+    p.add_argument("--items", type=int, default=5, help="items per department")
     p.set_defaults(func=cmd_make_sample)
 
     p = sub.add_parser("ingest", help="raw M5 CSVs -> processed parquet")
@@ -186,6 +221,22 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--no-retrain", action="store_true",
                    help="monitor only; don't trigger retraining")
     p.set_defaults(func=cmd_pipeline)
+
+    p = sub.add_parser("simulate", help="replay history day by day with an injected shock")
+    p.add_argument("--start", default=None, help="day 0 (default: last day minus --days)")
+    p.add_argument("--days", type=int, default=120)
+    p.add_argument("-m", "--model", choices=sorted(MODELS), default="lightgbm")
+    p.add_argument("--shock-date", default=None, help="default: halfway through the replay")
+    p.add_argument("--shock-factor", type=float, default=1.6, help="demand multiplier")
+    p.add_argument("--price-factor", type=float, default=1.0, help="price multiplier")
+    p.add_argument("--dept", default=None, help="limit the shock to one dept, e.g. FOODS_3")
+    p.add_argument("--weekly-retrain", action="store_true",
+                   help="also retrain every Monday, like the production schedule")
+    p.set_defaults(func=cmd_simulate)
+
+    p = sub.add_parser("dashboard", help="run the Streamlit monitoring dashboard")
+    p.add_argument("--port", type=int, default=8501)
+    p.set_defaults(func=cmd_dashboard)
 
     args = parser.parse_args(argv)
     cfg = load_config(args.config) if args.config else load_config()

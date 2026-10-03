@@ -10,3 +10,4 @@ mlflow.db
 *.egg-info/
 .env
 reports/
+sim/

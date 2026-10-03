@@ -775,13 +775,11 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "streamlit" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.optional-dependencies]
-dashboard = [
-    { name = "streamlit" },
-]
 models = [
     { name = "optuna" },
     { name = "prophet" },
@@ -809,10 +807,10 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=15" },
     { name = "pydantic", specifier = ">=2.6" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "streamlit", marker = "extra == 'dashboard'", specifier = ">=1.33" },
+    { name = "streamlit", specifier = ">=1.33" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
-provides-extras = ["models", "dashboard"]
+provides-extras = ["models"]
 
 [package.metadata.requires-dev]
 dev = [

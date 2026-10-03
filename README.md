@@ -15,8 +15,8 @@ and a served API.
 | 3b | Prophet or N-BEATS | later |
 | 4 | MLflow registry + champion promotion, FastAPI serving | done |
 | 5 | Prefect training + monitoring flows, Evidently drift, retrain triggers | done |
-| 6 | Replay simulation with injected drift, Streamlit dashboard | next |
-| 7 | Docker Compose, GitHub Actions CI | |
+| 6 | Replay simulation with injected drift, Streamlit dashboard | done |
+| 7 | Docker Compose, GitHub Actions CI | next |
 
 ## Quickstart
 
@@ -77,6 +77,29 @@ PREFECT_API_URL=http://127.0.0.1:4200/api uv run forecast pipeline serve   # ter
 | `training` | Mondays 03:00 | load data up to as-of -> validate -> backtest, fit, register, promote -> batch-forecast all series into the prediction log |
 | `monitoring` | daily 06:00 | join logged forecasts to arrived actuals (live WAPE, bias, by horizon) -> Evidently drift on sales / price / price change vs the champion's training window -> record the run -> trigger `training` if any rule fires |
 
+### Replay demo + dashboard
+
+```bash
+uv run forecast simulate --days 120 --shock-factor 1.6   # demand x1.6 from halfway through
+uv run forecast dashboard                                 # http://localhost:8501
+```
+
+`simulate` stands on day 0, trains, then walks forward one day at a time running the real
+monitoring flow each day (which retrains whenever a trigger fires). A shock can be injected
+from any date: `--shock-factor` scales demand, `--price-factor` scales prices, `--dept` limits
+it to one department, `--weekly-retrain` adds the Monday schedule. Everything is written to
+`sim/` (its own registry, logs and reports), so the real workspace is untouched.
+
+The dashboard shows, for either workspace:
+
+- **KPIs:** serving version, live WAPE vs backtest, share of drifting columns, model age, last decision
+- **Live accuracy:** trailing-7-day WAPE against the backtest WAPE and the retrain limit, with
+  markers where a new champion started serving and the shock window shaded
+- **Drift:** Evidently score per monitored column against the drift threshold
+- **Actual vs forecast:** total units per day, and a per-series drill-down showing each version's forecast
+- **Tables:** monitoring log with every decision and reason, registry versions, and the
+  embedded Evidently HTML report for any day
+
 Retrain triggers (in `configs/config.yaml`): live WAPE > 1.25x the champion's backtest WAPE
 (given >= 100 scored points), >= 50% of monitored columns drifted, or the champion's data is
 more than 35 days old. Every monitoring run is stored in `data/monitoring.sqlite` and each drift
@@ -131,10 +154,12 @@ src/forecast/
   models/                  ForecastModel interface, baselines, LightGBM
   api/                     FastAPI app, request/response schemas, prediction log
   flows/                   Prefect training + monitoring flows, schedules
-  monitoring/              live accuracy, Evidently drift, retrain policy, run store
+  monitoring/              live accuracy, Evidently drift, retrain policy, run store, dashboard views
   registry.py              train -> register -> promote, champion loading
+  simulation/              day-by-day replay with injected shocks
   serving_model.py         deployable model bundle (MLflow pyfunc)
   tracking.py              MLflow logging
   cli.py                   `forecast` command
+dashboard/app.py           Streamlit model-health dashboard
 tests/
 ```

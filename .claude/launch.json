@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "streamlit", "run", "dashboard/app.py", "--server.port", "8501",
+                      "--server.headless", "true", "--browser.gatherUsageStats", "false"],
+      "port": 8501
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "forecast", "serve", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}
