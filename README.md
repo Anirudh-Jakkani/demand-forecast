@@ -13,12 +13,43 @@ and a served API.
 |---|---|---|
 | 1 | Ingest + validation (M5 → long Parquet) | done |
 | 2 | Rolling-origin backtest harness, metrics, baselines, MLflow tracking | done |
-| 3a | Global LightGBM (lags / rolling / price / calendar), Tweedie loss | done |
+| 3a | Global LightGBM (lags / rolling / price / calendar), Tweedie loss, horizon buckets | done |
 | 3b | Prophet or N-BEATS | later |
 | 4 | MLflow registry + champion promotion, FastAPI serving | done |
 | 5 | Prefect training + monitoring flows, Evidently drift, retrain triggers | done |
 | 6 | Replay simulation with injected drift, Streamlit dashboard | done |
 | 7 | Docker Compose, GitHub Actions CI | done |
+
+## Results on real M5 (California, FOODS)
+
+5,748 store x item series, daily units 2013-01-01 to 2016-05-22 (6.29M rows, 49.7% of
+days sell zero). Rolling-origin backtest: 4 folds x 28-day horizon, the last ending
+2016-05-22; every model sees only data up to its fold's cutoff.
+
+| Model | WAPE | RMSSE | Bias | Train time (4 folds) |
+|---|---|---|---|---|
+| **LightGBM, horizon buckets 7/14/28** | **0.670** | **0.762** | -3.4% | 64 min |
+| LightGBM, single model (lags >= 28) | 0.680 | 0.769 | -4.9% | 16 min |
+| Moving average (28 days) | 0.691 | 0.777 | -2.5% | seconds |
+| Seasonal naive (same weekday last week) | 0.819 | 1.000 | -3.0% | seconds |
+
+Where the gain comes from (latest fold, cutoff 2016-04-24, WAPE by forecast day):
+
+| Model | Days 1-7 | Days 8-14 | Days 15-28 |
+|---|---|---|---|
+| LightGBM, buckets | **0.638** | **0.657** | 0.664 |
+| LightGBM, single | 0.654 | 0.665 | 0.664 |
+| Moving average | 0.681 | 0.675 | 0.686 |
+
+The bucketed model trains separate boosters for days 1-7, 8-14 and 15-28 whose sales
+features may be as recent as 7, 14 and 28 days. Each is leak-free for its own days (tests
+scramble post-cutoff sales and assert no in-horizon feature moves). The gain is entirely
+on the near days, and days 15-28 are identical by construction. Both LightGBM variants
+under-forecast far days (bias -7.4% on days 15-28) because 4-week-old signal trails rising
+demand; trend / year-over-year features are the next thing to try.
+
+Item x store x day is the noisiest level of M5, so absolute WAPE is high for every model;
+the comparison between models, on identical folds, is what matters.
 
 ## Quickstart
 
