@@ -95,8 +95,11 @@ def plot_backtest(result: BacktestResult):
 
 def plot_importance(imp, top: int = 20):
     top_imp = imp.head(top).iloc[::-1]
+    labels = top_imp["feature"]
+    if "bucket" in top_imp and top_imp["bucket"].nunique() > 1:
+        labels = labels + "  (" + top_imp["bucket"] + ")"
     fig, ax = plt.subplots(figsize=(7, 0.3 * len(top_imp) + 1))
-    ax.barh(top_imp["feature"], top_imp["gain"], color="C0")
+    ax.barh(labels, top_imp["gain"], color="C0")
     ax.set_xlabel("total gain (last fold)")
     ax.set_title(f"Top {len(top_imp)} features")
     fig.tight_layout()

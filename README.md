@@ -154,8 +154,8 @@ docker compose up -d --build
 | `worker` | runs the weekly training and daily monitoring schedules | |
 | `dashboard` | Streamlit model health | http://localhost:8501 |
 
-All app services share one image and the same `configs/config.yaml`; the standard
-`MLFLOW_TRACKING_URI` env var points them at the MLflow server. To use real M5 data, put the
+All app services share one image and the same `configs/config.yaml`; the
+`FORECAST_TRACKING_URI` env var points them at the MLflow server. To use real M5 data, put the
 CSVs in `./data/raw` and uncomment the bind mount in `docker-compose.yml`. Credentials default
 to `forecast/forecast`; override with `POSTGRES_USER` / `POSTGRES_PASSWORD` in a `.env` file.
 

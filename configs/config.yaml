@@ -18,6 +18,7 @@ models:                          # constructor kwargs per model; omitted ones us
   lightgbm:
     num_boost_round: 600
     train_days: 730              # fit on the last 2 years per fold (features use older history)
+    horizon_buckets: [7, 14, 28]  # boosters for days 1-7 / 8-14 / 15-28 (min lag 7 / 14 / 28)
     learning_rate: 0.05
     num_leaves: 127
     tweedie_variance_power: 1.1

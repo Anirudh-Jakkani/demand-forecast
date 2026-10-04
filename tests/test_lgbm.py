@@ -108,3 +108,48 @@ def test_chunked_feature_building_gives_identical_model(long_df):
     whole = LGBMForecaster(**FAST, chunk_series=10_000).fit(train).predict(future)
     chunked = LGBMForecaster(**FAST, chunk_series=3).fit(train).predict(future)
     np.testing.assert_allclose(chunked.to_numpy(), whole.to_numpy())
+
+
+BUCKETS = (7, 14, 28)
+
+
+@pytest.mark.parametrize("min_lag", BUCKETS)
+def test_bucket_features_ignore_sales_after_cutoff(long_df, min_lag):
+    """For each bucket: scrambling sales after the cutoff must not change any feature on
+    the days that bucket forecasts (cutoff+1 .. cutoff+min_lag)."""
+    from forecast.features.build import feature_names
+
+    cutoff = long_df["date"].max() - pd.Timedelta(days=35)  # room to look past the bucket
+    scrambled = long_df.copy()
+    after = scrambled["date"] > cutoff
+    scrambled.loc[after, "sales"] = np.random.default_rng(1).integers(0, 100, after.sum())
+
+    a = add_features(long_df, min_lag).set_index(["id", "date"])
+    b = add_features(scrambled, min_lag).set_index(["id", "date"])
+    dates = a.index.get_level_values("date")
+    window = (dates > cutoff) & (dates <= cutoff + pd.Timedelta(days=min_lag))
+    names = feature_names(min_lag)
+    pd.testing.assert_frame_equal(a.loc[window, names], b.loc[window, names])
+    # ...and one day further the bucket WOULD leak, which is why buckets cap their horizon.
+    beyond = dates == cutoff + pd.Timedelta(days=min_lag + 1)
+    assert not a.loc[beyond, names].equals(b.loc[beyond, names])
+
+
+def test_bucketed_model_routes_each_day_to_its_bucket(long_df):
+    fold = make_folds(long_df["date"].max(), horizon=28, n_folds=1, step=28)[0]
+    train, test = split(long_df, fold)
+    future = test.drop(columns="sales")
+    model = LGBMForecaster(**FAST, horizon_buckets=BUCKETS).fit(train)
+    assert sorted(model.boosters) == list(BUCKETS)
+
+    yhat = model.predict(future)
+    assert yhat.notna().all() and (yhat >= 0).all() and len(yhat) == len(future)
+
+    # Predicting only days 1-7 must give the same numbers: those rows use the 7-day booster
+    # whatever else is in the request.
+    first_week = future[(future["date"] - fold.cutoff).dt.days <= 7]
+    np.testing.assert_allclose(model.predict(first_week).to_numpy(),
+                               yhat.loc[first_week.index].to_numpy(), rtol=1e-6)
+    imp = model.feature_importance()
+    assert set(imp["bucket"]) == {"days 1-7", "days 8-14", "days 15-28"}
+    assert model.get_params()["horizon_buckets"] == [7, 14, 28]

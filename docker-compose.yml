@@ -7,7 +7,7 @@
 # To use real M5 data, put the three CSVs in ./data/raw and uncomment the bind mount below.
 
 x-env: &env
-  MLFLOW_TRACKING_URI: http://mlflow:5000
+  FORECAST_TRACKING_URI: http://mlflow:5000
   PREFECT_API_URL: http://prefect-server:4200/api
   MLFLOW_DISABLE_AGENT_HINT: "1"
 

@@ -1,9 +1,10 @@
 """Feature engineering for the global LightGBM model.
 
-Leakage rule: every sales-derived feature uses lags >= MIN_LAG days. As long as the
-forecast horizon is <= MIN_LAG, a row in the forecast window only ever reads sales
-from on or before the cutoff, so one model can predict the whole horizon directly
-(no recursive feeding of its own forecasts).
+Leakage rule: every sales-derived feature uses lags >= `min_lag` days. A row whose forecast
+horizon is <= min_lag then only ever reads sales from on or before the cutoff, so a model
+can predict that whole horizon directly (no recursive feeding of its own forecasts).
+Horizon-bucketed models use a smaller min_lag for near days (fresher signal) and the full
+28 for far days; see models.lgbm.
 
 Price, calendar and event features are known ahead of time and need no lag.
 Assumes each series is a contiguous daily run (enforced by data.validate).
@@ -14,29 +15,46 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-MIN_LAG = 28
-LAGS = (28, 35, 42, 49, 56, 364)        # 364 = same weekday last year
-ROLL_WINDOWS = (7, 28, 56, 112)         # rolling stats over the lag-28 series
+MIN_LAG = 28                            # default: one model for the whole 28-day horizon
+ROLL_WINDOWS = (7, 28, 56, 112)         # rolling stats over the min-lag series
+YEAR_LAG = 364                          # same weekday last year
 
 CATEGORICAL = ["item_id", "dept_id", "store_id", "event_name_1", "event_type_1"]
 CALENDAR = ["wday", "month", "year", "dayofmonth", "weekofyear", "snap"]
 PRICE = ["sell_price", "price_norm", "price_change_7", "price_momentum_28"]
-SALES = (
-    [f"lag_{lag}" for lag in LAGS]
-    + [f"rmean_{MIN_LAG}_{w}" for w in ROLL_WINDOWS]
-    + [f"rstd_{MIN_LAG}_28", f"zero_share_{MIN_LAG}_28"]
-)
-FEATURES = CATEGORICAL + CALENDAR + PRICE + SALES
+
+
+def sales_lags(min_lag: int = MIN_LAG) -> tuple[int, ...]:
+    """Weekly-aligned lags starting at min_lag, plus last year."""
+    return tuple(min_lag + 7 * k for k in range(5)) + (YEAR_LAG,)
+
+
+def sales_features(min_lag: int = MIN_LAG) -> list[str]:
+    return (
+        [f"lag_{lag}" for lag in sales_lags(min_lag)]
+        + [f"rmean_{min_lag}_{w}" for w in ROLL_WINDOWS]
+        + [f"rstd_{min_lag}_28", f"zero_share_{min_lag}_28"]
+    )
+
+
+def feature_names(min_lag: int = MIN_LAG) -> list[str]:
+    return CATEGORICAL + CALENDAR + PRICE + sales_features(min_lag)
+
+
+LAGS = sales_lags()
+SALES = sales_features()
+FEATURES = feature_names()
 
 PRICE_WINDOW = 364                      # price_norm = price / max price over the last year
 
 # Days of history to keep before the cutoff so every in-horizon feature is computable
-# exactly as it was in training (+ MIN_LAG margin for the horizon itself).
+# exactly as it was in training (+ MIN_LAG margin for the horizon itself). The default
+# (largest) min_lag needs the most history, so this covers every bucket.
 LOOKBACK_DAYS = max(max(LAGS), MIN_LAG + max(ROLL_WINDOWS), PRICE_WINDOW) + MIN_LAG
 
 
-def add_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Return a copy of `df` (sorted by id, date) with all FEATURES columns added.
+def add_features(df: pd.DataFrame, min_lag: int = MIN_LAG) -> pd.DataFrame:
+    """Return a copy of `df` (sorted by id, date) with `feature_names(min_lag)` added.
 
     Future rows may carry NaN sales; they only feed lags that no in-horizon row reads.
     Every series is processed in one vectorized pass (no per-series Python), and features
@@ -46,14 +64,14 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     start = _group_starts(df["id"])
 
     sales = df["sales"].to_numpy(dtype="float64", na_value=np.nan)
-    for lag in LAGS:
+    for lag in sales_lags(min_lag):
         df[f"lag_{lag}"] = _lag(sales, lag, start)
-    base = df[f"lag_{MIN_LAG}"].to_numpy(dtype="float64")
+    base = df[f"lag_{min_lag}"].to_numpy(dtype="float64")
     for w in ROLL_WINDOWS:
-        df[f"rmean_{MIN_LAG}_{w}"] = _rolling_mean(base, w, 1, start)
-    df[f"rstd_{MIN_LAG}_28"] = _rolling_std(base, 28, 2, start)
+        df[f"rmean_{min_lag}_{w}"] = _rolling_mean(base, w, 1, start)
+    df[f"rstd_{min_lag}_28"] = _rolling_std(base, 28, 2, start)
     is_zero = np.where(np.isnan(base), np.nan, (base == 0).astype("float64"))
-    df[f"zero_share_{MIN_LAG}_28"] = _rolling_mean(is_zero, 28, 1, start)
+    df[f"zero_share_{min_lag}_28"] = _rolling_mean(is_zero, 28, 1, start)
 
     # Calendar.
     df["dayofmonth"] = df["date"].dt.day.astype("int8")

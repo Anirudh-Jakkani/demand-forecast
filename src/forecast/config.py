@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "config.yaml"
+TRACKING_URI_ENV = "FORECAST_TRACKING_URI"
 
 
 class DataConfig(BaseModel):
@@ -85,8 +86,10 @@ class Config(BaseModel):
 def load_config(path: Path | str = DEFAULT_CONFIG) -> Config:
     with open(path, encoding="utf-8") as f:
         cfg = Config.model_validate(yaml.safe_load(f))
-    # Standard MLflow variable wins, so containers can point at a tracking server
-    # (e.g. http://mlflow:5000) while sharing the same YAML as local runs.
-    if os.environ.get("MLFLOW_TRACKING_URI"):
-        cfg.mlflow.tracking_uri = os.environ["MLFLOW_TRACKING_URI"]
+    # Lets containers point at a tracking server (e.g. http://mlflow:5000) while sharing
+    # the same YAML as local runs. Deliberately NOT MLFLOW_TRACKING_URI: mlflow writes that
+    # variable into os.environ on every set_tracking_uri(), so honouring it would make one
+    # workspace's registry leak into every config loaded later in the same process.
+    if os.environ.get(TRACKING_URI_ENV):
+        cfg.mlflow.tracking_uri = os.environ[TRACKING_URI_ENV]
     return cfg
