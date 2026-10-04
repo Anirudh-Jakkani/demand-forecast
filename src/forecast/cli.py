@@ -78,6 +78,8 @@ def cmd_backtest(cfg, args) -> None:
 
         print(f"\n== {name} ({elapsed:.0f}s) ==")
         print(result.fold_metrics.to_string(index=False))
+        print("by forecast day (pooled over folds):")
+        print(result.by_horizon().round(4).to_string(index=False))
         summaries[name] = {**result.summary, "seconds": elapsed}
 
         if not args.no_mlflow:

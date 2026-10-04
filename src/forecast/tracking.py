@@ -62,6 +62,9 @@ def log_backtest_details(result: BacktestResult) -> None:
         for metric in ("wape", "mae", "rmse", "bias", "rmsse"):
             mlflow.log_metric(f"fold_{metric}", getattr(row, metric), step=row.fold)
     mlflow.log_metrics({f"cv_{k}": v for k, v in result.summary.items()})
+    for row in result.by_horizon().itertuples(index=False):
+        key = row.horizon.replace("days ", "h").replace("-", "_")   # e.g. h1_7
+        mlflow.log_metrics({f"cv_wape_{key}": row.wape, f"cv_bias_{key}": row.bias})
 
     with tempfile.TemporaryDirectory() as tmp:
         fold_csv = Path(tmp) / "fold_metrics.csv"

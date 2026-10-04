@@ -12,8 +12,10 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from forecast.evaluation.metrics import score
+from forecast.evaluation.metrics import bias, score, wape
 from forecast.models.base import ForecastModel
+
+HORIZON_BUCKETS = (7, 14, 28)     # reporting buckets for accuracy by forecast day
 
 
 @dataclass(frozen=True)
@@ -51,12 +53,25 @@ def iter_splits(df, horizon, n_folds, step) -> Iterator[tuple[Fold, pd.DataFrame
 @dataclass
 class BacktestResult:
     fold_metrics: pd.DataFrame      # one row per fold
-    predictions: pd.DataFrame       # id, date, fold, sales, yhat
+    predictions: pd.DataFrame       # id, date, fold, horizon, sales, yhat
     last_model: ForecastModel       # model from the most recent fold, for inspection
 
     @property
     def summary(self) -> dict[str, float]:
         return self.fold_metrics.drop(columns=["fold", "cutoff"]).mean().to_dict()
+
+    def by_horizon(self, edges: tuple[int, ...] = HORIZON_BUCKETS) -> pd.DataFrame:
+        """WAPE and bias per forecast-day bucket, pooled over all folds."""
+        p = self.predictions
+        labels = [f"days {lo}-{hi}" for lo, hi in zip((1,) + tuple(e + 1 for e in edges[:-1]),
+                                                      edges, strict=True)]
+        bucket = pd.cut(p["horizon"], bins=(0,) + tuple(edges), labels=labels)
+        rows = []
+        for label, g in p.groupby(bucket, observed=True):
+            y, yhat = g["sales"].to_numpy(float), g["yhat"].to_numpy(float)
+            rows.append({"horizon": label, "wape": wape(y, yhat), "bias": bias(y, yhat),
+                         "n": len(g)})
+        return pd.DataFrame(rows)
 
 
 def run_backtest(
@@ -73,6 +88,7 @@ def run_backtest(
         scored = test[["id", "date", "sales"]].copy()
         scored["yhat"] = yhat.to_numpy()
         scored["fold"] = fold.index
+        scored["horizon"] = (scored["date"] - fold.cutoff).dt.days
         rows.append({"fold": fold.index, "cutoff": fold.cutoff, **score(train, scored)})
         preds.append(scored)
 

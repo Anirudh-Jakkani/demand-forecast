@@ -37,3 +37,13 @@ class _SpyModel(ForecastModel):
 def test_predict_never_sees_target(long_df):
     run_backtest(_SpyModel, long_df, horizon=7, n_folds=2, step=7)
     assert all("sales" not in cols for cols in _SpyModel.seen_future_cols)
+
+
+def test_accuracy_by_forecast_day(long_df):
+    from forecast.models import SeasonalNaive
+
+    result = run_backtest(SeasonalNaive, long_df, horizon=28, n_folds=2, step=28)
+    assert result.predictions["horizon"].between(1, 28).all()
+    table = result.by_horizon()
+    assert table["horizon"].tolist() == ["days 1-7", "days 8-14", "days 15-28"]
+    assert table["n"].sum() == len(result.predictions)
