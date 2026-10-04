@@ -17,3 +17,5 @@ __pycache__/
 /sim/
 /sim_run.log
 /.ci-check/
+/archive/
+/*.log
