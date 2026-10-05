@@ -83,18 +83,20 @@ def hover_time_chart(long: pd.DataFrame, x: str, y: str, series: str, colors: di
     return alt.layer(lines, rule, points)
 
 
-def event_layers(changes: pd.DataFrame, shock: dict | None, end: pd.Timestamp) -> list:
+def event_layers(changes: pd.DataFrame, shock: dict | None, end: pd.Timestamp,
+                 label_y: float = 0) -> list:
     layers = []
     if shock:
         band = pd.DataFrame({"start": [pd.Timestamp(shock["date"])], "end": [end],
                              "label": [shock_label(shock)]})
         layers.append(alt.Chart(band).mark_rect(color=MUTED, opacity=0.10)
                       .encode(x="start:T", x2="end:T"))
-        # Label sits on the zero line inside the band, clear of the threshold lines up top.
+        # Label sits at the bottom of the band (`label_y`, the zero line by default), clear
+        # of the threshold lines up top.
         # (Anchored in data space: a pixel position at the bottom edge shrinks the plot.)
         layers.append(alt.Chart(band).mark_text(align="left", baseline="bottom", dx=4, dy=-4,
                                                 color=INK_2, fontSize=11)
-                      .encode(x="start:T", y=alt.datum(0), text="label:N"))
+                      .encode(x="start:T", y=alt.datum(label_y), text="label:N"))
     if not changes.empty:
         ev = changes.assign(label="▲ v" + changes["model_version"].astype(str))
         layers.append(alt.Chart(ev).mark_rule(color=INK_2, strokeDash=[2, 3], strokeWidth=1)
@@ -209,16 +211,23 @@ with bias_col:
     st.subheader("Live bias vs. the retrain band")
     bias = (runs[["as_of", "live_bias"]].dropna()
             .assign(series="live bias").rename(columns={"live_bias": "bias"}))
-    layers = event_layers(changes, shock, end)
     limit = m.max_abs_bias
+    # Pad the y-range so the shock label (bottom) and the ▲ markers (top) have room clear
+    # of the bias line and the limit lines.
+    lo = min(bias["bias"].min(), -(limit or 0)) - 0.05 if not bias.empty else -0.05
+    hi = max(bias["bias"].max(), limit or 0) + 0.05 if not bias.empty else 0.05
+    layers = event_layers(changes, shock, end, label_y=lo)
+    layers.append(alt.Chart(pd.DataFrame({"bias": [lo, hi]})).mark_point(opacity=0)
+                  .encode(y="bias:Q"))
     if limit is not None:
-        lim = pd.DataFrame({"bias": [-limit, limit]})
+        lim = pd.DataFrame({"bias": [-limit, limit], "as_of": [end, end],
+                            "label": [f"−{limit:.0%} limit", f"+{limit:.0%} limit"]})
         layers.append(alt.Chart(lim).mark_rule(color=MUTED, strokeDash=[5, 4], strokeWidth=1.5)
                       .encode(y="bias:Q"))
-        layers.append(alt.Chart(lim).mark_text(align="left", baseline="bottom", dy=-3,
+        # Right-aligned just under each line: clear of the ▲ markers along the top edge.
+        layers.append(alt.Chart(lim).mark_text(align="right", baseline="top", dx=-2, dy=3,
                                                color=INK_2, fontSize=11)
-                      .encode(x=alt.value(4), y="bias:Q",
-                              text=alt.Text("bias:Q", format="+.0%")))
+                      .encode(x="as_of:T", y="bias:Q", text="label:N"))
     layers.append(alt.Chart(pd.DataFrame({"bias": [0]}))
                   .mark_rule(color=INK_2, strokeWidth=1, opacity=0.5).encode(y="bias:Q"))
     chart = hover_time_chart(bias, "as_of", "bias", "series", {"live bias": BLUE},

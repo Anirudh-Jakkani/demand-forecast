@@ -117,10 +117,20 @@ uv run forecast simulate --days 120 --shock-factor 1.6   # demand x1.6 from half
 uv run forecast dashboard                                 # http://localhost:8501
 ```
 
-Example run on the synthetic sample (start 2016-01-15, demand x1.6 from 2016-03-15): live WAPE
-climbs from 1.03x to 1.20x the backtest score over five days, Evidently flags `sales` drift on
-day 4, the cooldown holds it for one more day, and on 2016-03-20 the monitoring flow retrains
-on its own (`target 'sales' drifted`). The new champion brings WAPE back to ~1.0x within a week.
+Example run on the synthetic sample (start 2016-01-15, demand x1.6 from 2016-03-15):
+
+- Live WAPE never reaches its retrain limit: it peaks at 1.14x the backtest score
+  (limit 1.25x). Error on 20 noisy daily series hides a 60% jump in demand.
+- Live bias does show it. It was already -14% the day before the shock, crossed the limit
+  on the shock day (-20.1%), and the monitoring flow retrained that same day.
+- Each new model has seen only a few shocked days, so it still under-forecasts. The bias
+  rule fires again as each cooldown ends (03-22, 03-29), drift fires once more on 04-07,
+  and bias is back inside -10% by mid-April.
+- With the bias rule off, the same replay first retrains on 03-21 (target drift). Over the
+  month after the shock it under-forecasts by 19.9% instead of 18.4%.
+- With only 20 series the weekly bias is noisy (-12% to +3% before the shock), so the rule
+  also fired once with no shock (02-01, -15.2%). Bias over the 5.7k real series should be
+  much steadier.
 
 `simulate` stands on day 0, trains, then walks forward one day at a time running the real
 monitoring flow each day (which retrains whenever a trigger fires). A shock can be injected
