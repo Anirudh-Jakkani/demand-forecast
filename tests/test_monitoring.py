@@ -57,6 +57,21 @@ def test_retrain_policy_triggers():
     assert retrain_reasons(cfg, 0.40, 0.40, 1.0, 3, 500, ["sales"]) == []
 
 
+def test_retrain_policy_bias():
+    cfg = MonitoringConfig(max_abs_bias=0.15, min_points=100, drift_cooldown_days=7)
+    assert retrain_reasons(cfg, 0.40, 0.40, 0.0, 7, 500, live_bias=-0.10) == []
+    assert retrain_reasons(cfg, 0.40, 0.40, 0.0, 7, 500, live_bias=-0.22) == [
+        "live bias -22.0% (under-forecasting; limit ±15%)"]
+    assert "over-forecasting" in retrain_reasons(cfg, 0.40, 0.40, 0.0, 7, 500,
+                                                 live_bias=0.30)[0]
+    # Not on too few points, not during the post-retrain cooldown, not when switched off.
+    assert retrain_reasons(cfg, 0.40, 0.40, 0.0, 7, 10, live_bias=-0.5) == []
+    assert retrain_reasons(cfg, 0.40, 0.40, 0.0, 6, 500, live_bias=-0.5) == []
+    off = cfg.model_copy(update={"max_abs_bias": None})
+    assert retrain_reasons(off, 0.40, 0.40, 0.0, 7, 500, live_bias=-0.5) == []
+    assert retrain_reasons(cfg, 0.40, 0.40, 0.0, 7, 500, live_bias=float("nan")) == []
+
+
 def test_drift_detects_demand_shift(long_df, tmp_path):
     end = long_df["date"].max()
     ref_end = end - pd.Timedelta(days=28)
@@ -139,3 +154,27 @@ def test_demand_shock_triggers_retrain(prefect_env, tmp_path, raw_dir, long_df):
     assert "sales" in result["drifted_columns"]
     # The triggered retrain ran and refreshed the champion on post-shock data.
     assert result["training"]["promoted"] and result["training"]["as_of"] == two_weeks
+
+
+@pytest.mark.slow
+def test_bias_catches_a_demand_shift_within_days(prefect_env, tmp_path, raw_dir, long_df):
+    from forecast.flows.monitoring import monitoring_flow
+    from forecast.flows.training import training_flow
+
+    cutoff = long_df["date"].max() - pd.Timedelta(days=56)
+    shock_day = cutoff + pd.Timedelta(days=10)          # past the post-retrain cooldown
+    shocked = long_df.copy()
+    shocked.loc[shocked["date"] >= shock_day, "sales"] *= 1.6
+    cfg, cfg_path = _setup(tmp_path, raw_dir, shocked)
+
+    training_flow(as_of=str(cutoff.date()), model="moving_average", config_path=cfg_path)
+    before = monitoring_flow(as_of=str((shock_day - pd.Timedelta(days=1)).date()),
+                             config_path=cfg_path, auto_retrain=False)
+    assert before["decision"] == "ok", before["reasons"]
+
+    # Three shocked days out of the 7-day window: bias is past -15%, drift is not yet.
+    after = monitoring_flow(as_of=str((shock_day + pd.Timedelta(days=2)).date()),
+                            config_path=cfg_path, auto_retrain=False)
+    assert after["live_bias"] < -cfg.monitoring.max_abs_bias
+    assert [r for r in after["reasons"] if r.startswith("live bias")], after["reasons"]
+    assert "sales" not in after["drifted_columns"]

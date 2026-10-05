@@ -75,6 +75,7 @@ def monitoring_flow(as_of: str | None = None, config_path: str | None = None,
         cfg.monitoring, perf["live_wape"], champ["cv_wape"],
         drift.share if drift else None, age, perf["n_points"],
         drift.drifted_columns if drift else None, drift.scores if drift else None,
+        live_bias=perf["live_bias"] if perf["n_points"] else None,
     )
     decision = "retrain" if reasons else "ok"
     ratio = (perf["live_wape"] / champ["cv_wape"]

@@ -40,11 +40,12 @@ monitoring:
   window_days: 7                 # score live forecasts on the last 7 days of actuals
   min_points: 100
   max_wape_ratio: 1.25           # retrain if live WAPE > 1.25x the backtest WAPE
+  max_abs_bias: 0.15             # ...or if live bias is past +/-15% (systematic over/under)
   drift_window_days: 28
   drift_share_threshold: 0.5     # retrain if >= half the monitored columns drifted
   target_drift_trigger: true     # ...or if the target (sales) drifts on its own
   target_column: sales
-  drift_cooldown_days: 7         # a fresh model gets a week before drift can retrain it again
+  drift_cooldown_days: 7         # a fresh model gets a week before drift or bias can retrain it
   max_model_age_days: 35
   db_path: data/monitoring.sqlite
   reports_dir: reports           # Evidently HTML drift reports

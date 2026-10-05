@@ -25,6 +25,7 @@ def monitoring_runs(cfg: Config) -> pd.DataFrame:
     runs["reasons"] = runs["reasons"].map(lambda s: json.loads(s) if s else [])
     runs["drift_scores"] = runs["drift_scores"].map(lambda s: json.loads(s) if s else {})
     runs["wape_limit"] = runs["cv_wape"] * cfg.monitoring.max_wape_ratio
+    runs["bias_limit"] = cfg.monitoring.max_abs_bias
     return runs.reset_index(drop=True)
 
 

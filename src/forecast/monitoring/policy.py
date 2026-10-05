@@ -16,6 +16,7 @@ def retrain_reasons(
     n_points: int,
     drifted_columns: list[str] | None = None,
     drift_scores: dict[str, float] | None = None,
+    live_bias: float | None = None,
 ) -> list[str]:
     reasons = []
     if n_points >= cfg.min_points and cv_wape and not math.isnan(live_wape):
@@ -23,9 +24,18 @@ def retrain_reasons(
         if ratio > cfg.max_wape_ratio:
             reasons.append(f"live WAPE {live_wape:.3f} is {ratio:.2f}x the backtest "
                            f"WAPE {cv_wape:.3f} (limit {cfg.max_wape_ratio:.2f}x)")
-    # A fresh model gets a cooldown: its reference window still holds pre-change data,
-    # so drift would otherwise fire again the next day.
+    # A fresh model gets a cooldown: its drift reference window still holds pre-change
+    # data, and the live window is still mostly scored on the old model's forecasts, so
+    # drift and bias would otherwise fire again the next day.
     if model_age_days >= cfg.drift_cooldown_days:
+        # Bias reacts to a level shift within days. WAPE on noisy daily series barely
+        # moves, and drift needs a week or more of shifted days in its 28-day window.
+        if (cfg.max_abs_bias is not None and live_bias is not None
+                and n_points >= cfg.min_points and not math.isnan(live_bias)
+                and abs(live_bias) > cfg.max_abs_bias):
+            side = "over" if live_bias > 0 else "under"
+            reasons.append(f"live bias {live_bias:+.1%} ({side}-forecasting; "
+                           f"limit ±{cfg.max_abs_bias:.0%})")
         if drift_share is not None and drift_share >= cfg.drift_share_threshold:
             reasons.append(f"{drift_share:.0%} of monitored columns drifted "
                            f"(limit {cfg.drift_share_threshold:.0%})")

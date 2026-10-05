@@ -52,13 +52,19 @@ def load(config_path: str):
 
 def hover_time_chart(long: pd.DataFrame, x: str, y: str, series: str, colors: dict[str, str],
                      y_title: str, dashes: dict[str, list[int]] | None = None,
-                     fmt: str = ".3f") -> alt.LayerChart:
+                     fmt: str = ".3f", axis_fmt: str | None = None) -> alt.LayerChart:
     """Multi-line time chart with a nearest-x crosshair and a tooltip listing every series."""
     domain = list(colors)
+    # One series needs no legend box: the chart title names it.
+    legend = (alt.Legend(orient="top", title=None, symbolStrokeWidth=3) if len(domain) > 1
+              else None)
     color = alt.Color(f"{series}:N", scale=alt.Scale(domain=domain, range=list(colors.values())),
-                      legend=alt.Legend(orient="top", title=None, symbolStrokeWidth=3))
+                      legend=legend)
     base = alt.Chart(long).encode(x=alt.X(f"{x}:T", title=None),
-                                  y=alt.Y(f"{y}:Q", title=y_title), color=color)
+                                  y=alt.Y(f"{y}:Q", title=y_title,
+                                          axis=alt.Axis(format=axis_fmt) if axis_fmt
+                                          else alt.Undefined),
+                                  color=color)
     dash = dashes or {}
     lines = base.mark_line(strokeWidth=2).encode(
         strokeDash=alt.StrokeDash(f"{series}:N", legend=None, scale=alt.Scale(
@@ -142,11 +148,13 @@ cfg, runs, scored, versions, ids = load(str(config_path))
 shock = meta.get("shock") if meta else None
 
 st.title("Forecast model health")
+m = cfg.monitoring
+bias_rule = (f"live bias is past ±{m.max_abs_bias:.0%}, "
+             if m.max_abs_bias is not None else "")
 st.caption(f"Registry model `{cfg.registry.model_name}` · daily store × item unit sales · "
-           f"retrain if live WAPE > {cfg.monitoring.max_wape_ratio:g}× backtest, "
-           f"`{cfg.monitoring.target_column}` drifts, "
-           f"≥ {cfg.monitoring.drift_share_threshold:.0%} of columns drift, or the model is "
-           f"> {cfg.monitoring.max_model_age_days} days old")
+           f"retrain if live WAPE > {m.max_wape_ratio:g}× backtest, {bias_rule}"
+           f"`{m.target_column}` drifts, ≥ {m.drift_share_threshold:.0%} of columns drift, "
+           f"or the model is > {m.max_model_age_days} days old")
 
 if runs.empty:
     st.info("No monitoring runs yet. Run `uv run forecast simulate` for a demo, or "
@@ -158,42 +166,72 @@ changes = views.version_changes(runs)
 end = runs["as_of"].max()
 
 # KPI row
-k = st.columns(5)
+k = st.columns(6)
 k[0].metric("Serving", f"v{latest['model_version']}", help=f"model type: {latest['model_type']}")
 if pd.notna(latest["live_wape"]):
     k[1].metric("Live WAPE", f"{latest['live_wape']:.3f}",
                 f"{latest['live_wape'] - latest['cv_wape']:+.3f} vs backtest",
                 delta_color="inverse")
+    k[2].metric("Live bias", f"{latest['live_bias']:+.1%}",
+                help="+ = over-forecasting, − = under-forecasting, as a share of actual units")
 else:
     k[1].metric("Live WAPE", "n/a", help="no forecasts cover the last 7 days")
-k[2].metric("Drifting", "n/a" if pd.isna(latest["drift_share"])
+    k[2].metric("Live bias", "n/a", help="no forecasts cover the last 7 days")
+k[3].metric("Drifting", "n/a" if pd.isna(latest["drift_share"])
             else f"{latest['drift_share']:.0%}")
-k[3].metric("Age", f"{int(latest['model_age_days'])}d")
-k[4].metric("Decision", decision_badge(latest["decision"]),
+k[4].metric("Age", f"{int(latest['model_age_days'])}d")
+k[5].metric("Decision", decision_badge(latest["decision"]),
             help=f"{len(changes)} model changes during this period")
 if latest["reasons"]:
     st.warning("**Retrain triggered on " + str(latest["as_of"].date()) + ":** "
                + "; ".join(latest["reasons"]))
 
+acc, bias_col = st.columns(2)
+
 # 1. Live accuracy
-st.subheader("Live accuracy vs. the retrain limit")
-wape = runs[["as_of", "live_wape", "cv_wape", "wape_limit"]].rename(columns={
-    "live_wape": "live WAPE", "cv_wape": "backtest WAPE", "wape_limit": "retrain limit"})
-wape_long = wape.melt("as_of", var_name="series", value_name="wape").dropna()
-chart = hover_time_chart(
-    wape_long, "as_of", "wape", "series",
-    {"live WAPE": BLUE, "backtest WAPE": INK_2, "retrain limit": MUTED},
-    "WAPE (lower is better)", dashes={"retrain limit": [5, 4]},
-)
-st.altair_chart(alt.layer(*event_layers(changes, shock, end), chart)
-                .properties(height=300),
-                use_container_width=True)
-st.caption("Live WAPE scores the forecasts that were actually served over the trailing 7 days. "
-           "▲ marks the day a new champion started serving; the shaded band is the injected shock.")
+with acc:
+    st.subheader("Live accuracy vs. the retrain limit")
+    wape = runs[["as_of", "live_wape", "cv_wape", "wape_limit"]].rename(columns={
+        "live_wape": "live WAPE", "cv_wape": "backtest WAPE", "wape_limit": "retrain limit"})
+    wape_long = wape.melt("as_of", var_name="series", value_name="wape").dropna()
+    chart = hover_time_chart(
+        wape_long, "as_of", "wape", "series",
+        {"live WAPE": BLUE, "backtest WAPE": INK_2, "retrain limit": MUTED},
+        "WAPE (lower is better)", dashes={"retrain limit": [5, 4]},
+    )
+    st.altair_chart(alt.layer(*event_layers(changes, shock, end), chart)
+                    .properties(height=300), use_container_width=True)
+    st.caption("Scores the forecasts actually served over the trailing 7 days. ▲ marks the "
+               "day a new champion started serving; the shaded band is the injected shock.")
+
+# 2. Live bias
+with bias_col:
+    st.subheader("Live bias vs. the retrain band")
+    bias = (runs[["as_of", "live_bias"]].dropna()
+            .assign(series="live bias").rename(columns={"live_bias": "bias"}))
+    layers = event_layers(changes, shock, end)
+    limit = m.max_abs_bias
+    if limit is not None:
+        lim = pd.DataFrame({"bias": [-limit, limit]})
+        layers.append(alt.Chart(lim).mark_rule(color=MUTED, strokeDash=[5, 4], strokeWidth=1.5)
+                      .encode(y="bias:Q"))
+        layers.append(alt.Chart(lim).mark_text(align="left", baseline="bottom", dy=-3,
+                                               color=INK_2, fontSize=11)
+                      .encode(x=alt.value(4), y="bias:Q",
+                              text=alt.Text("bias:Q", format="+.0%")))
+    layers.append(alt.Chart(pd.DataFrame({"bias": [0]}))
+                  .mark_rule(color=INK_2, strokeWidth=1, opacity=0.5).encode(y="bias:Q"))
+    chart = hover_time_chart(bias, "as_of", "bias", "series", {"live bias": BLUE},
+                             "bias (+ over, − under)", fmt="+.1%", axis_fmt="+.0%")
+    st.altair_chart(alt.layer(*layers, chart).properties(height=300),
+                    use_container_width=True)
+    st.caption("(forecast − actual) ÷ actual units over the same 7 days. A level shift shows "
+               "up here within days, long before WAPE or drift; dashed lines are the "
+               "retrain limit.")
 
 left, right = st.columns(2)
 
-# 2. Drift
+# 3. Drift
 with left:
     st.subheader("Data drift vs. training window")
     drift = views.drift_long(runs)
@@ -212,7 +250,7 @@ with left:
         st.altair_chart(alt.layer(*event_layers(changes, shock, end), chart)
                         .properties(height=280), use_container_width=True)
 
-# 3. Totals
+# 4. Totals
 with right:
     st.subheader("Total units per day: actual vs. forecast")
     totals = views.daily_totals(scored)
@@ -225,7 +263,7 @@ with right:
         st.altair_chart(alt.layer(*event_layers(changes, shock, end), chart)
                         .properties(height=280), use_container_width=True)
 
-# 4. One series
+# 5. One series
 st.subheader("Drill down: one series")
 if ids:
     sid = st.selectbox("Series", ids, index=0)
@@ -247,7 +285,7 @@ if ids:
     st.altair_chart(chart.properties(height=260), use_container_width=True)
     st.caption("Each orange segment is one model version's 28-day batch forecast.")
 
-# 5. Tables
+# 6. Tables
 tab_runs, tab_versions, tab_report = st.tabs(["Monitoring log", "Registry versions",
                                               "Evidently report"])
 with tab_runs:
@@ -256,7 +294,7 @@ with tab_runs:
                         drifted=runs["drifted_columns"].fillna("[]"))
     st.dataframe(
         table[["as_of", "model_version", "model_age_days", "n_points", "live_wape", "cv_wape",
-               "wape_ratio", "drift_share", "drifted", "decision", "reasons"]]
+               "wape_ratio", "live_bias", "drift_share", "drifted", "decision", "reasons"]]
         .sort_values("as_of", ascending=False),
         hide_index=True, use_container_width=True,
         column_config={
@@ -264,6 +302,7 @@ with tab_runs:
             "live_wape": st.column_config.NumberColumn("live WAPE", format="%.3f"),
             "cv_wape": st.column_config.NumberColumn("backtest WAPE", format="%.3f"),
             "wape_ratio": st.column_config.NumberColumn("ratio", format="%.2f×"),
+            "live_bias": st.column_config.NumberColumn("live bias", format="percent"),
             "drift_share": st.column_config.NumberColumn("drift share", format="%.2f"),
         },
     )

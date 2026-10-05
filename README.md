@@ -130,9 +130,10 @@ it to one department, `--weekly-retrain` adds the Monday schedule. Everything is
 
 The dashboard shows, for either workspace:
 
-- **KPIs:** serving version, live WAPE vs backtest, share of drifting columns, model age, last decision
+- **KPIs:** serving version, live WAPE vs backtest, live bias, share of drifting columns, model age, last decision
 - **Live accuracy:** trailing-7-day WAPE against the backtest WAPE and the retrain limit, with
   markers where a new champion started serving and the shock window shaded
+- **Live bias:** trailing-7-day bias (+ over, − under) against the ±15% retrain band
 - **Drift:** Evidently score per monitored column against the drift threshold
 - **Actual vs forecast:** total units per day, and a per-series drill-down showing each version's forecast
 - **Tables:** monitoring log with every decision and reason, registry versions, and the
@@ -141,8 +142,12 @@ The dashboard shows, for either workspace:
 Retrain triggers (in `configs/config.yaml`), any one is enough:
 
 - live WAPE > 1.25x the champion's backtest WAPE (given >= 100 scored points)
-- the target (`sales`) drifts, or >= 50% of monitored columns drift; drift is ignored for
-  7 days after a retrain so a fresh model isn't retrained again on the same change
+- live bias is past ±15% (given >= 100 scored points): the model is systematically
+  under- or over-forecasting
+- the target (`sales`) drifts, or >= 50% of monitored columns drift
+- drift and bias are ignored for 7 days after a retrain, so a fresh model isn't retrained
+  again on the same change while its windows still hold the old model's forecasts and
+  pre-change data
 - the champion's data is more than 35 days old (capped at the 28-day horizon in replays,
   so there are never days without forecasts to score)
 
